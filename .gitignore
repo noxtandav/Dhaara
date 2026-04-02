@@ -1,0 +1,30 @@
+# --- Secrets & config ---
+config.yaml
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# --- Virtual environment ---
+venv/
+.venv/
+env/
+
+# --- IDE & OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- OpenCode internal ---
+.opencode/
+
+# --- Logs ---
+*.log

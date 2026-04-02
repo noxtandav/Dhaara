@@ -1,0 +1,48 @@
+telegram:
+  bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
+  authorized_user_id: 123456789  # Your Telegram user ID (get from @userinfobot)
+
+# Path to the shared data directory. Can be absolute or use ~.
+# Keep this outside the project so future PAI agents can share it.
+data_dir: "~/PAI/DhaaraData"
+
+bedrock:
+  # AWS Bedrock model ID - user-configurable.
+  # Dhaara uses the Bedrock Converse API — a unified interface across all models.
+  # You do NOT need model-specific prompt formats; AWS handles that internally.
+  #
+  # IMPORTANT: Newer generation models require an inference profile ID (prefixed),
+  # NOT the bare model ID. Using the bare ID gives a ValidationException error.
+  # Prefix guide:
+  #   global.<model>  — cross-region, routes across all AWS commercial regions
+  #   us.<model>      — US-only cross-region routing
+  #   (no prefix)     — single-region, only works for models that support it
+  #
+  # Dhaara requires: system prompts + tool use + multi-turn chat.
+  #
+  # Correct IDs to use (us-east-1, pricing per 1M tokens in / out):
+  #
+  #   us.amazon.nova-micro-v1:0                             ~$0.04 / ~$0.14  cheapest, text-only
+  #   us.amazon.nova-lite-v1:0                              ~$0.06 / ~$0.24  cheap + multimodal
+  #   us.amazon.nova-pro-v1:0                               ~$0.80 / ~$3.20  strong Amazon model
+  #   mistral.mistral-large-3-675b-instruct                  $0.50 / $1.50   no prefix needed
+  #   global.anthropic.claude-haiku-4-5-20251001-v1:0        $1.00 / $5.00   fast Anthropic
+  #   global.anthropic.claude-sonnet-4-6                     $3.00 / $15.00  << recommended
+  #   global.anthropic.claude-opus-4-6-v1                    $5.00 / $25.00  most capable
+  #
+  # NOT compatible (no tool use — will error at startup):
+  #   amazon.titan-*, deepseek.*, meta.llama2-*, meta.llama3-2-1b/3b-*,
+  #   mistral.mistral-7b-*, mistral.mistral-small-2402-*, ai21.j2-*, cohere.command-text-*
+  model_id: "global.anthropic.claude-sonnet-4-6"
+  region: "us-east-1"
+  # AWS profile name from ~/.aws/config or ~/.aws/credentials
+  # Run `aws configure list-profiles` to see your available profiles.
+  # If omitted, boto3's default credential chain is used
+  # (AWS_PROFILE env var, [default] profile, IAM role, etc.)
+  aws_profile: "default"
+
+sarvam:
+  api_key: "YOUR_SARVAM_AI_API_KEY"
+  # Models used (not configurable — these are the right ones for each task):
+  #   saaras:v3   — Speech-to-text for voice messages (transcribe + translate modes)
+  #   mayura:v1   — Text translation (Indic <-> English) and language detection
