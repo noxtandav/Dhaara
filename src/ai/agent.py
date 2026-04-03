@@ -4,6 +4,7 @@ Handles the conversation loop with AWS Bedrock, including tool use.
 """
 import json
 import logging
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from .bedrock import BedrockClient
 from .prompts import build_system_prompt, TOOLS
 from ..journal.store import JournalStore
 from ..journal.silos import list_silos, create_silo
+from ..config import load_config
 from ..context.telos import read_telos
 from ..context.state import ConversationState, Message
 
@@ -21,10 +23,11 @@ MAX_TOOL_ROUNDS = 8
 
 
 class DhaaraAgent:
-    def __init__(self, bedrock: BedrockClient, data_dir: Path):
+    def __init__(self, bedrock: BedrockClient):
+        config = load_config()
         self._bedrock = bedrock
-        self._data_dir = data_dir
-        self._store = JournalStore(data_dir)
+        self._data_dir = config.data_dir
+        self._store = JournalStore(config.data_dir)
         self._state = ConversationState()
 
     def handle_message(
@@ -126,6 +129,8 @@ class DhaaraAgent:
                 return self._tool_create_silo(input_data)
             elif name == "read_telos":
                 return self._tool_read_telos(input_data)
+            elif name == "proxy_shell":
+                return self._tool_proxy_shell(input_data)
             else:
                 return f"Unknown tool: {name}"
         except Exception as e:
@@ -172,3 +177,64 @@ class DhaaraAgent:
     def _tool_read_telos(self, data: dict) -> str:
         background = data["background"]
         return read_telos(self._data_dir, background)
+
+    def _tool_proxy_shell(self, data: dict) -> str:
+        """
+        Executes a whitelisted shell command in data_dir.
+        Args:
+            data: {"command": str, "require_review": bool}
+        Returns:
+            Output or confirmation prompt.
+        """
+        command = data["command"]
+        require_review = data.get("require_review", False)
+        
+        # 1. Validate command against whitelist
+        whitelist = {
+            "ls": {"-l", "-a"},
+            "grep": {"-r", "-n", "-i", "-v"},
+            "sed": {"-i", "-n", "-E"},
+            "awk": {},
+            "echo": {},
+            "cat": {},
+            "mv": {},
+            "cp": {},
+            "mkdir": {},
+            "nano": {}
+        }
+        cmd_parts = command.split()
+        if not cmd_parts or cmd_parts[0] not in whitelist:
+            return f"Command '{cmd_parts[0]}' not whitelisted."
+
+        # 2. Sanitize inputs
+        sanitized = []
+        for part in cmd_parts:
+            # Strip metacharacters
+            part = part.replace("$", "").replace("`", "").replace(">", "").replace("|", "").replace(";", "")
+            # Reject path traversal
+            if "../" in part or part.startswith("/"):
+                return f"Invalid path: {part}"
+            sanitized.append(part)
+        sanitized_cmd = " ".join(sanitized)
+
+        # 3. Require review for destructive commands
+        if require_review or any(x in command for x in ["-i", ">>", "mv", "cp"]):
+            return f"Will run:\n```bash\n{sanitized_cmd}\n```\nProceed? (Y/n)"
+
+        # 4. Execute in data_dir
+        try:
+            result = subprocess.run(
+                sanitized_cmd,
+                cwd=self._data_dir,
+                shell=False,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            # 5. Log to .proxy_history
+            history_path = self._data_dir / ".proxy_history"
+            with open(history_path, "a") as f:
+                f.write(f"{datetime.now().isoformat()} | {sanitized_cmd}\n")
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            return f"Error: {e.stderr}"

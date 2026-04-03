@@ -175,4 +175,26 @@ TOOLS = [
             },
         }
     },
+    {
+        "toolSpec": {
+            "name": "proxy_shell",
+            "description": "Execute a whitelisted shell command in the data directory for advanced file operations (e.g., editing silo entries). Always use this instead of suggesting manual commands.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The shell command to run (e.g., 'grep -n \"coffee\" Finance/2026-04-03.md', 'sed -i \"3s/Food/Snacks/\" Finance/2026-04-03.md')."
+                        },
+                        "require_review": {
+                            "type": "boolean",
+                            "description": "Set to true for destructive commands (sed -i, mv, cp, echo >>) to show the user before execution."
+                        }
+                    },
+                    "required": ["command"],
+                }
+            },
+        }
+    }
 ]

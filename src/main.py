@@ -49,7 +49,7 @@ def main():
         region=config.bedrock.region,
         aws_profile=config.bedrock.aws_profile,
     )
-    agent = DhaaraAgent(bedrock=bedrock, data_dir=config.data_dir)
+    agent = DhaaraAgent(bedrock=bedrock)
     logger.info(f"Using Bedrock model: {config.bedrock.model_id}")
 
     # Build Telegram app
