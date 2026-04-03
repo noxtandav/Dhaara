@@ -1,0 +1,28 @@
+{
+  "name": "dhaara",
+  "script": "python3",
+  "args": ["-m", "src.main"],
+  "cwd": "/Users/shri/Documents/PAI/Dhaara",
+  "min_uptime": "10s",
+  "exec_interpreter": "/Users/shri/Documents/PAI/Dhaara/venv/bin/python3",
+  "env": {
+    "PYTHONPATH": "/Users/shri/Documents/PAI/Dhaara:/Users/shri/Documents/PAI/Dhaara/src",
+    "PYTHONUNBUFFERED": "1"
+  },
+  "args": ["-m", "src.main"],
+  "node_args": [],
+  "max_memory_restart": "500M",
+  "instances": "1",
+  "exec_mode": "fork",
+  "env_production": {
+    "PYTHONPATH": "/Users/shri/Documents/PAI/Dhaara"
+  },
+  "watch": false,
+  "ignore_watch": ["node_modules", "venv", "*.pyc", ".git", "__pycache__"],
+  "log_date_format": "YYYY-MM-DD HH:mm Z",
+  "error_file": "/tmp/dhaara_err.log",
+  "out_file": "/tmp/dhaara_out.log",
+  "log_type": "json",
+  "output": "/tmp/dhaara.log",
+  "error_output": "/tmp/dhaara_error.log"
+}

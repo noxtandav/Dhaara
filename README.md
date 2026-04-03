@@ -113,11 +113,20 @@ Make sure your AWS profile has the following IAM permissions:
 Also enable model access for your chosen provider in the AWS Bedrock console:
 **AWS Console → Amazon Bedrock → Model access → Enable models**
 
-### 6. Run
+### 6. Run the Bot
 
 ```bash
+# One-time run (foreground)
 python -m src.main
+
+# Recommended: Run as a background service using PM2
+# (requires Node.js/npm)
+npm install -g pm2
+# Create a process file and start automagick service
+pm2 start pm2-ecosystem.json --name dhaara
+pm2 save & pm2 startup
 ```
+
 
 ---
 

@@ -1,0 +1,19 @@
+{
+  "apps": [
+    {
+      "name": "dhaara",
+      "cwd": "/Users/shri/Documents/PAI/Dhaara",
+      "script": "/Users/shri/Documents/PAI/Dhaara/venv/bin/python3",
+      "args": ["-m", "src.main"],
+      "max_memory_restart": "750M",
+      "autorestart": true,
+      "watch": false,
+      "output": "/tmp/dhaara.out.log",
+      "error": "/tmp/dhaara.errout.log",
+      "env": {
+        "PYTHONPATH": "/Users/shri/Documents/PAI/Dhaara/src",
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  ]
+}
