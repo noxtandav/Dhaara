@@ -39,7 +39,7 @@ class DhaaraAgent:
     ) -> str:
         """
         Process a user message (already in English) and return the agent's response (in English).
-        The bot layer handles translating the response back to the user's language.
+        The bot layer translates the response back to the user's language via Sarvam.
         """
         # Add user message to history
         self._state.add_message(chat_id, "user", user_text)
@@ -101,7 +101,7 @@ class DhaaraAgent:
                 break
 
         # Fallback if we hit max rounds
-        final_response = "I've processed your entry. Let me know if you'd like any changes."
+        final_response = "Entry recorded."  # Always return English
         self._state.add_message(chat_id, "assistant", final_response)
         return final_response
 
@@ -152,13 +152,13 @@ class DhaaraAgent:
             tags=tags,
             finance_items=finance_items,
         )
-        return f"Entry recorded in {silo} silo ({path.name})."
+        return "Entry recorded."  # English only
 
     def _tool_read_today_entries(self, data: dict, timestamp: datetime) -> str:
         silo = data["silo"]
         content = self._store.read_day(silo, timestamp)
         if content is None:
-            return f"No entries yet today in {silo} silo."
+            return "No entries yet."  # English only
         return content
 
     def _tool_list_silos(self) -> str:
@@ -172,7 +172,7 @@ class DhaaraAgent:
         name = data["name"]
         description = data["description"]
         create_silo(self._data_dir, name, description)
-        return f"Silo '{name}' created successfully."
+        return "Silo created."  # English only
 
     def _tool_read_telos(self, data: dict) -> str:
         background = data["background"]

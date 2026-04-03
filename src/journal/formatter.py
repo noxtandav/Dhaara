@@ -3,7 +3,6 @@ Format journal entries into markdown.
 """
 from datetime import datetime
 
-
 def format_entry(
     text: str,
     timestamp: datetime,

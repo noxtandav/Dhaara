@@ -3,6 +3,7 @@ Telegram message handlers for text and voice input.
 """
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -32,8 +33,7 @@ def make_handlers(
 
         chat_id = message.chat_id
         raw_text = message.text.strip()
-        timestamp = message.date or datetime.now(timezone.utc)
-        timestamp = timestamp.replace(tzinfo=None)  # naive UTC for simplicity
+        timestamp = message.date or datetime.now()  # Local timezone (naive fallback)
 
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
@@ -48,11 +48,11 @@ def make_handlers(
             detected_lang=processed.language_code,
         )
 
-        # Translate response back to user's language if not English
-        if processed.language_code and not processed.language_code.startswith("en"):
+        # Always translate response via Sarvam
+        if processed.language_code:
             reply = sarvam.translate_to_language(english_response, processed.language_code)
         else:
-            reply = english_response
+            reply = english_response  # Fallback to English
 
         await message.reply_text(reply)
 
@@ -63,8 +63,7 @@ def make_handlers(
             return
 
         chat_id = message.chat_id
-        timestamp = message.date or datetime.now(timezone.utc)
-        timestamp = timestamp.replace(tzinfo=None)
+        timestamp = message.date or datetime.now()  # Local time
 
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
@@ -94,28 +93,30 @@ def make_handlers(
             detected_lang=processed.language_code,
         )
 
-        # Translate response if needed
-        if processed.language_code and not processed.language_code.startswith("en"):
+        # Always translate response via Sarvam
+        if processed.language_code:
             reply = sarvam.translate_to_language(english_response, processed.language_code)
         else:
-            reply = english_response
+            reply = english_response  # Fallback to English
 
         await message.reply_text(reply)
 
     @authorized_only(authorized_user_id)
     async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
-        await update.message.reply_text(
-            "Hi! I'm Dhaara, your personal journal assistant.\n\n"
-            "Just tell me about your day — what you did, how you feel, money spent, "
-            "books read, or anything else. I'll record it in the right place.\n\n"
-            "You can also send voice messages. I understand Indian languages too!"
-        )
+        if update.message:
+            await update.message.reply_text(
+                "Hi! I'm Dhaara, your personal journal assistant.\n\n"
+                "Just tell me about your day — what you did, how you feel, money spent, "
+                "books read, or anything else. I'll record it in the right place.\n\n"
+                "You can also send voice messages. I understand Indian languages too!"
+            )
 
     @authorized_only(authorized_user_id)
     async def handle_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /clear command — clears conversation history."""
-        agent._state.clear(update.message.chat_id)
-        await update.message.reply_text("Conversation history cleared.")
+        if update.message:
+            agent._state.clear(update.message.chat_id)
+            await update.message.reply_text("Conversation history cleared.")
 
     return handle_text, handle_voice, handle_start, handle_clear
