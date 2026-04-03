@@ -1,0 +1,29 @@
+// PM2 Configuration Template for Dhaara
+//
+// Copy this file to ".config/pm2.config.js" or refer to guidelines.
+// Then run:
+//   pm2 start ecosystem.config.js --env=production
+
+module.exports = {
+  apps : [{
+    name: "dhaara",
+    script: "./venv/bin/python",
+    args: "-m src.main",
+    cwd: __dirname,
+    interpreter: "none",
+    autorestart: true,  // auto restart if fails
+    watch: false,
+    max_restarts: 10,
+    env: {
+      NODE_ENV: "development",
+      PYTHONPATH: __dirname,           // Include project root in Python path
+    },
+    env_production: {
+      NODE_ENV: "production",
+      // Use persistent db for production, others are relevant
+    },
+    error_file: "./logs/dhaara-err.log",
+    out_file: "./logs/dhaara-out.log",
+    time: false
+  }]
+}
