@@ -1,46 +1,46 @@
 """
-Format journal entries into markdown.
+Format journal entries into the one-file-per-day markdown format.
+
+File format:
+  # YYYY-MM-DD Journal
+
+  ## [WORK]
+  - entry text
+
+  ## [PERSONAL]
+  - entry text
+
+  ## [HABITS]
+  - entry text
+
+  ## [FINANCE]
+  - entry text
+
+Categories are fixed: WORK, PERSONAL, HABITS, FINANCE
 """
 from datetime import datetime
+
+CATEGORIES = ["WORK", "PERSONAL", "HABITS", "FINANCE"]
+
 
 def format_entry(
     text: str,
     timestamp: datetime,
+    category: str,
     mood: str | None = None,
-    tags: list[str] | None = None,
-    finance_items: list[dict] | None = None,
 ) -> str:
     """
-    Format a single journal entry as a markdown section.
-
-    finance_items: list of {"item": str, "amount": float|int, "category": str}
+    Format a single bullet entry for a specific category section.
     """
-    time_str = timestamp.strftime("%-I:%M %p")  # e.g. "10:32 AM"
-    lines = [f"### {time_str}", text, ""]
-
-    if finance_items:
-        lines.append("| Item | Amount | Category |")
-        lines.append("|---|---|---|")
-        total = 0
-        for fi in finance_items:
-            lines.append(f"| {fi['item']} | {fi['amount']} | {fi['category']} |")
-            total += fi.get("amount", 0)
-        lines.append("")
-        lines.append(f"**Daily Total:** {total}")
-        lines.append("")
-
+    time_str = timestamp.strftime("%-I:%M %p")
+    entry = f"- [{time_str}] {text}"
     if mood:
-        lines.append(f"**Mood:** {mood}")
-    if tags:
-        tag_str = " ".join(f"#{t.lstrip('#')}" for t in tags)
-        lines.append(f"**Tags:** {tag_str}")
-
-    # Ensure trailing newline
-    lines.append("")
-    return "\n".join(lines)
+        entry += f"  *(mood: {mood})*"
+    return entry
 
 
 def format_day_header(date: datetime) -> str:
     """Return the markdown header for a new daily file."""
     date_str = date.strftime("%Y-%m-%d")
-    return f"# {date_str}\n\n## Entries\n"
+    sections = "\n\n".join(f"## [{cat}]" for cat in CATEGORIES)
+    return f"# {date_str} Journal\n\n{sections}\n"

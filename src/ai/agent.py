@@ -11,7 +11,6 @@ from pathlib import Path
 from .bedrock import BedrockClient
 from .prompts import build_system_prompt, TOOLS
 from ..journal.store import JournalStore
-from ..journal.silos import list_silos, create_silo
 from ..config import load_config
 from ..context.telos import read_telos
 from ..context.state import ConversationState, Message
@@ -121,12 +120,8 @@ class DhaaraAgent:
         try:
             if name == "record_entry":
                 return self._tool_record_entry(input_data, timestamp)
-            elif name == "read_today_entries":
-                return self._tool_read_today_entries(input_data, timestamp)
-            elif name == "list_silos":
-                return self._tool_list_silos()
-            elif name == "create_silo":
-                return self._tool_create_silo(input_data)
+            elif name == "read_today":
+                return self._tool_read_today(input_data, timestamp)
             elif name == "read_telos":
                 return self._tool_read_telos(input_data)
             elif name == "proxy_shell":
@@ -138,41 +133,23 @@ class DhaaraAgent:
             return f"Error executing {name}: {str(e)}"
 
     def _tool_record_entry(self, data: dict, timestamp: datetime) -> str:
-        silo = data["silo"]
+        category = data["category"]
         text = data["text"]
         mood = data.get("mood")
-        tags = data.get("tags", [])
-        finance_items = data.get("finance_items")
 
         path = self._store.append_entry(
-            silo=silo,
+            category=category,
             text=text,
             timestamp=timestamp,
             mood=mood,
-            tags=tags,
-            finance_items=finance_items,
         )
         return "Entry recorded."  # English only
 
-    def _tool_read_today_entries(self, data: dict, timestamp: datetime) -> str:
-        silo = data["silo"]
-        content = self._store.read_day(silo, timestamp)
+    def _tool_read_today(self, data: dict, timestamp: datetime) -> str:
+        content = self._store.read_day(timestamp)
         if content is None:
             return "No entries yet."  # English only
         return content
-
-    def _tool_list_silos(self) -> str:
-        silos = list_silos(self._data_dir)
-        if not silos:
-            return "No silos found."
-        lines = [f"- {s['name']}: {s['description']}" for s in silos]
-        return "Available silos:\n" + "\n".join(lines)
-
-    def _tool_create_silo(self, data: dict) -> str:
-        name = data["name"]
-        description = data["description"]
-        create_silo(self._data_dir, name, description)
-        return "Silo created."  # English only
 
     def _tool_read_telos(self, data: dict) -> str:
         background = data["background"]

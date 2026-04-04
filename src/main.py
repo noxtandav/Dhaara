@@ -18,7 +18,6 @@ from .voice.sarvam import SarvamClient
 from .ai.bedrock import BedrockClient
 from .ai.agent import DhaaraAgent
 from .bot.handler import make_handlers
-from .journal.silos import init_data_dir
 from .context.telos import init_telos_files
 
 logging.basicConfig(
@@ -38,7 +37,6 @@ def main():
     logger.info(f"Starting Dhaara. Data dir: {config.data_dir}")
 
     # Initialize data directory structure
-    init_data_dir(config.data_dir)
     init_telos_files(config.data_dir)
     logger.info("Data directory initialized.")
 

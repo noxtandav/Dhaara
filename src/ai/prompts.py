@@ -5,153 +5,113 @@ from datetime import datetime
 from pathlib import Path
 
 from ..context.telos import read_all_telos
-from ..journal.silos import list_silos
 
 
 def build_system_prompt(data_dir: Path) -> str:
     today = datetime.now().strftime("%A, %B %d, %Y")
     telos_content = read_all_telos(data_dir)
-    silos = list_silos(data_dir)
-    silo_lines = "\n".join(
-        f"  - {s['name']}: {s['description']}" for s in silos
-    )
 
-    return f"""You are Dhaara, a personal AI journal assistant. You help the user record and organize their daily journal entries.
+    return f"""You are Dhaara, a personal AI journal assistant. Every entry goes into ONE file per day.
 
-Today's date: {today}
+## Daily File Format
+Each day is one file: `journal/YYYY-MM-DD.md`
+Categories are written as `## [CATEGORY]` section headers with bullet entries:
 
-## Your Silos (journal categories)
-{silo_lines}
+```
+# 2024-05-20 Journal
 
-## User's TELOS Backgrounds
-{telos_content}
+## [WORK]
+- [10:32 AM] Finished the project proposal.
+- [2:15 PM] Meeting ran late.
 
-## Your Behavior Rules
+## [PERSONAL]
+- [9:00 AM] Had breakfast with family.
 
-1. RECORDING: When the user shares something about their day, activities, thoughts, feelings, expenses, or experiences — this is a journal entry. Record it.
+## [HABITS]
+- Gym: Yes
+- Meditated: 10 mins
 
-2. CLASSIFICATION: Classify entries into the most relevant silo(s). Use the silo descriptions above to decide.
-   - If an entry spans multiple silos (e.g., "Had a headache, couldn't focus on work"), record it in ALL relevant silos.
-   - Finance entries (any mention of money spent/received) ALWAYS go in Finance silo.
+## [FINANCE]
+- Spent $50 on groceries.
+```
 
-3. UNCERTAINTY: If you genuinely cannot determine which silo(s) to use after reading the silo descriptions, ask the user ONE clear question. Don't ask if it's obvious.
+## Categories (always use these exact names)
+| Category | What goes here |
+|---|---|
+| WORK | Professional tasks, projects, meetings, work decisions |
+| PERSONAL | Everything else — health, emotions, friendships, leisure, family |
+| HABITS | Tracked habits: exercise, meditation, sleep, diet, routines |
+| FINANCE | Money spent or earned: expenses, income, investments |
 
-4. NEW SILOS: If the user's entry doesn't fit any existing silo well, suggest creating a new silo. Wait for confirmation before creating it.
+## Rules
 
-5. MOOD: Detect the emotional tone from entries (happy, frustrated, tired, excited, neutral, low, anxious, etc.). Record it only when clearly evident — don't force it.
+1. RECORDING: When the user shares something from their day, ALWAYS record it as a bullet entry in the right category. Never skip.
 
-6. TAGS: Extract 1-3 relevant tags from entries (e.g., #exercise, #work, #reading, #health). Keep them concise.
+2. CLASSIFICATION: Pick ONE category. Be decisive — don't ask unless it's genuinely ambiguous.
+   - "Had lunch with client, discussed project" → WORK (dominant theme is the project discussion)
+   - "Couldn't sleep, felt anxious about presentation" → PERSONAL (emotional tone)
+   - "Spent 2 hours at gym" → HABITS
+   - "Paid rent" → FINANCE
 
-7. FINANCE: When expenses or income are mentioned, extract each item with its amount and categorize it (Food, Transport, Medical, Groceries, Entertainment, Utilities, etc.).
+3. HABITS FORMAT: For habit entries, write the habit and result/value naturally:
+   - `Gym: Yes`, `Meditated: 15 mins`, `Sleep: 7 hours`, `Screen time: 3 hours`
 
-8. CONFIRMATION: After recording, always tell the user what you recorded and in which silo(s). Keep confirmations brief.
+4. FINANCE FORMAT: For money entries, write the amount and what it was for:
+   - `Spent ₹500 on groceries.`, `Received ₹50,000 salary.`, `Invested ₹10,000 in mutual fund.`
 
-9. CONVERSATION: You can have normal conversations too. Not every message is a journal entry. Be warm, concise, and helpful.
+5. MOOD: Detect emotional tone when clearly evident. Write it naturally at the end of the entry: `(felt happy)`, `(felt frustrated)`, `(felt tired)`
 
-10. NO HALLUCINATION: Only reference silos and TELOS content that actually exist. Don't invent information.
+6. DUPLICATES: Before adding an entry, check if the same thing was already recorded today (check the day's file). If it's a repeat, just say "Already recorded."
 
-11. LANGUAGE: The user may write in English or Indian languages. You will always receive their message already translated to English. Respond in English — the bot will handle translating your response back to the user's language.
+7. READING PAST ENTRIES: You can read the day's file to check what's already recorded or to recall recent context.
 
-## Tool Usage
-Use your tools to record entries, check existing entries, and manage silos. Always use `record_entry` to persist journal data — do not just describe what you would record without actually recording it.
+8. CONFIRMATION: After recording, tell the user briefly: "Recorded to [CATEGORY]."
+
+9. CONVERSATION: You can also just chat — not everything is a journal entry.
+
+10. LANGUAGE: The user may write in English or Indian languages. You will always receive their message already translated to English. Respond in English — the bot handles translation.
+
+## Tools
 """
 
 
-# Tool definitions for Bedrock Converse API
 TOOLS = [
     {
         "toolSpec": {
             "name": "record_entry",
-            "description": "Record a journal entry to a specific silo's daily markdown file. Use this to persist the user's journal data.",
+            "description": "Record a bullet entry to the day's journal file under the correct category.",
             "inputSchema": {
                 "json": {
                     "type": "object",
                     "properties": {
-                        "silo": {
+                        "category": {
                             "type": "string",
-                            "description": "The silo name to record the entry in (e.g., 'Work', 'Personal', 'Habits', 'Finance')",
+                            "enum": ["WORK", "PERSONAL", "HABITS", "FINANCE"],
+                            "description": "The category to record this entry under.",
                         },
                         "text": {
                             "type": "string",
-                            "description": "The journal entry text to record (in English)",
+                            "description": "The entry text. Be natural and concise.",
                         },
                         "mood": {
                             "type": "string",
-                            "description": "Detected mood/emotion (e.g., 'happy', 'frustrated', 'tired', 'excited', 'neutral'). Omit if not clearly evident.",
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of 1-3 relevant tags without # prefix (e.g., ['exercise', 'health'])",
-                        },
-                        "finance_items": {
-                            "type": "array",
-                            "description": "List of financial items. Include only for Finance silo entries.",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "item": {"type": "string", "description": "Item name"},
-                                    "amount": {"type": "number", "description": "Amount in rupees"},
-                                    "category": {"type": "string", "description": "Category (Food, Transport, Medical, Groceries, Entertainment, Utilities, Other)"},
-                                },
-                                "required": ["item", "amount", "category"],
-                            },
+                            "description": "Optional mood/emotion if clearly evident (e.g. 'happy', 'frustrated', 'tired').",
                         },
                     },
-                    "required": ["silo", "text"],
+                    "required": ["category", "text"],
                 }
             },
         }
     },
     {
         "toolSpec": {
-            "name": "read_today_entries",
-            "description": "Read today's existing entries for a specific silo. Use this to understand context or avoid duplicate entries.",
-            "inputSchema": {
-                "json": {
-                    "type": "object",
-                    "properties": {
-                        "silo": {
-                            "type": "string",
-                            "description": "The silo name to read entries from",
-                        }
-                    },
-                    "required": ["silo"],
-                }
-            },
-        }
-    },
-    {
-        "toolSpec": {
-            "name": "list_silos",
-            "description": "List all available silos with their names and descriptions.",
+            "name": "read_today",
+            "description": "Read all entries from today's journal file to check what's already recorded or to recall context.",
             "inputSchema": {
                 "json": {
                     "type": "object",
                     "properties": {},
                     "required": [],
-                }
-            },
-        }
-    },
-    {
-        "toolSpec": {
-            "name": "create_silo",
-            "description": "Create a new silo (journal category). Only call this after the user has confirmed they want a new silo.",
-            "inputSchema": {
-                "json": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Name for the new silo (e.g., 'Health', 'Learning', 'Travel')",
-                        },
-                        "description": {
-                            "type": "string",
-                            "description": "Short description of what this silo is for",
-                        },
-                    },
-                    "required": ["name", "description"],
                 }
             },
         }
@@ -178,18 +138,18 @@ TOOLS = [
     {
         "toolSpec": {
             "name": "proxy_shell",
-            "description": "Execute a whitelisted shell command in the data directory for advanced file operations (e.g., editing silo entries). Always use this instead of suggesting manual commands.",
+            "description": "Execute a whitelisted shell command in the journal data directory for advanced operations.",
             "inputSchema": {
                 "json": {
                     "type": "object",
                     "properties": {
                         "command": {
                             "type": "string",
-                            "description": "The shell command to run (e.g., 'grep -n \"coffee\" Finance/2026-04-03.md', 'sed -i \"3s/Food/Snacks/\" Finance/2026-04-03.md')."
+                            "description": "The shell command to run (e.g. 'grep -n \"gym\" journal/').",
                         },
                         "require_review": {
                             "type": "boolean",
-                            "description": "Set to true for destructive commands (sed -i, mv, cp, echo >>) to show the user before execution."
+                            "description": "Set to true for destructive commands (sed -i, mv, rm) to show the user before execution.",
                         }
                     },
                     "required": ["command"],
