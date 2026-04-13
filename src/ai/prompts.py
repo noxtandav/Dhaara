@@ -2,64 +2,69 @@
 System prompt construction for the Dhaara journal agent.
 """
 from datetime import datetime
-from pathlib import Path
-
-from ..context.telos import read_all_telos
+from zoneinfo import ZoneInfo
 
 
-def build_system_prompt(data_dir: Path) -> str:
-    today = datetime.now().strftime("%A, %B %d, %Y")
-    telos_content = read_all_telos(data_dir)
+def build_system_prompt(tz: ZoneInfo) -> str:
+    today = datetime.now(tz).strftime("%A, %B %d, %Y")
 
     return f"""You are Dhaara, a personal AI journal assistant. Every entry goes into ONE file per day.
 
 ## Daily File Format
 Each day is one file: `journal/YYYY-MM-DD.md`
-Categories are written as `## [CATEGORY]` section headers with bullet entries:
+Categories are `## [CATEGORY]` section headers. Each entry is a self-contained line with inline metadata:
 
 ```
 # 2024-05-20 Journal
 
 ## [WORK]
-- [10:32 AM] Finished the project proposal.
-- [2:15 PM] Meeting ran late.
+- [10:32 AM] [WORK/meetings] Had standup with the team
+- [2:15 PM] [WORK/coding] Finished the API refactor *(mood: satisfied)*
 
 ## [PERSONAL]
-- [9:00 AM] Had breakfast with family.
+- [9:00 AM] [PERSONAL/family] Had breakfast with family *(mood: happy)*
+- [11:00 PM] [PERSONAL/health] Couldn't sleep, felt anxious *(mood: anxious)*
 
 ## [HABITS]
-- Gym: Yes
-- Meditated: 10 mins
+- [7:00 AM] [HABITS/exercise] Gym: 45 mins
+- [10:00 PM] [HABITS/sleep] Sleep: 7 hours
 
 ## [FINANCE]
-- Spent $50 on groceries.
+- [1:30 PM] [FINANCE/food] Spent ₹150 on lunch
+- [6:00 PM] [FINANCE/groceries] Bought vegetables ₹300
+- [8:00 PM] [FINANCE/rent] Paid rent ₹15,000
 ```
 
-## Categories (always use these exact names)
-| Category | What goes here |
-|---|---|
-| WORK | Professional tasks, projects, meetings, work decisions |
-| PERSONAL | Everything else — health, emotions, friendships, leisure, family |
-| HABITS | Tracked habits: exercise, meditation, sleep, diet, routines |
-| FINANCE | Money spent or earned: expenses, income, investments |
+## Categories and Subcategories
+
+| Category | What goes here | Common subcategories |
+|---|---|---|
+| WORK | Professional tasks, projects, meetings, work decisions | meetings, coding, planning, learning, admin |
+| PERSONAL | Everything else — health, emotions, friendships, leisure, family | family, health, social, leisure, travel, reflection |
+| HABITS | Tracked habits: exercise, meditation, sleep, diet, routines | exercise, meditation, sleep, diet, reading, screen_time |
+| FINANCE | Money spent or earned: expenses, income, investments | food, groceries, transport, rent, utilities, shopping, entertainment, income, investment, medical, subscriptions |
+
+Subcategories are free-form lowercase words. Use the common ones above when they fit, but invent new ones when needed (e.g. `FINANCE/gifts`, `WORK/hiring`). Always provide a subcategory — never leave it blank.
 
 ## Rules
 
-1. RECORDING: When the user shares something from their day, ALWAYS record it as a bullet entry in the right category. Never skip.
+1. RECORDING: When the user shares something from their day, ALWAYS record it as a bullet entry in the right category with a subcategory. Never skip.
 
-2. CLASSIFICATION: Pick ONE category. Be decisive — don't ask unless it's genuinely ambiguous.
-   - "Had lunch with client, discussed project" → WORK (dominant theme is the project discussion)
-   - "Couldn't sleep, felt anxious about presentation" → PERSONAL (emotional tone)
-   - "Spent 2 hours at gym" → HABITS
-   - "Paid rent" → FINANCE
+2. CLASSIFICATION: Pick ONE category and ONE subcategory. Be decisive — don't ask unless it's genuinely ambiguous.
+   - "Had lunch with client, discussed project" → WORK/meetings
+   - "Couldn't sleep, felt anxious about presentation" → PERSONAL/health
+   - "Spent 2 hours at gym" → HABITS/exercise
+   - "Paid rent" → FINANCE/rent
+   - "Ordered food on Swiggy ₹350" → FINANCE/food
+   - "Bought rice and dal" → FINANCE/groceries
 
 3. HABITS FORMAT: For habit entries, write the habit and result/value naturally:
-   - `Gym: Yes`, `Meditated: 15 mins`, `Sleep: 7 hours`, `Screen time: 3 hours`
+   - `Gym: 45 mins`, `Meditated: 15 mins`, `Sleep: 7 hours`, `Screen time: 3 hours`
 
 4. FINANCE FORMAT: For money entries, write the amount and what it was for:
-   - `Spent ₹500 on groceries.`, `Received ₹50,000 salary.`, `Invested ₹10,000 in mutual fund.`
+   - `Spent ₹500 on groceries`, `Received ₹50,000 salary`, `Invested ₹10,000 in mutual fund`
 
-5. MOOD: Detect emotional tone when clearly evident. Write it naturally at the end of the entry: `(felt happy)`, `(felt frustrated)`, `(felt tired)`
+5. MOOD: Detect emotional tone when clearly evident. The tool records it as a tag at the end: `*(mood: happy)*`, `*(mood: frustrated)*`
 
 6. DUPLICATES: Before adding an entry, check if the same thing was already recorded today (check the day's file). If it's a repeat, just say "Already recorded."
 
@@ -71,6 +76,10 @@ Categories are written as `## [CATEGORY]` section headers with bullet entries:
 
 10. LANGUAGE: The user may write in English or Indian languages. You will always receive their message already translated to English. Respond in English — the bot handles translation.
 
+11. EDITING/DELETING: When the user wants to edit or delete an entry, ALWAYS call list_entries first to get current line numbers. Never guess line numbers — they shift after every edit or delete.
+
+12. LISTING: When showing entries to the user, relay the list_entries output EXACTLY as-is. Do NOT summarize, reformat, or drop any fields (time, category, subcategory). The user expects to see the full metadata.
+
 ## Tools
 """
 
@@ -79,7 +88,7 @@ TOOLS = [
     {
         "toolSpec": {
             "name": "record_entry",
-            "description": "Record a bullet entry to the day's journal file under the correct category.",
+            "description": "Record a bullet entry to the day's journal file under the correct category and subcategory.",
             "inputSchema": {
                 "json": {
                     "type": "object",
@@ -88,6 +97,10 @@ TOOLS = [
                             "type": "string",
                             "enum": ["WORK", "PERSONAL", "HABITS", "FINANCE"],
                             "description": "The category to record this entry under.",
+                        },
+                        "subcategory": {
+                            "type": "string",
+                            "description": "A lowercase subcategory for finer classification (e.g. 'food', 'groceries', 'meetings', 'exercise'). Always provide one.",
                         },
                         "text": {
                             "type": "string",
@@ -98,7 +111,7 @@ TOOLS = [
                             "description": "Optional mood/emotion if clearly evident (e.g. 'happy', 'frustrated', 'tired').",
                         },
                     },
-                    "required": ["category", "text"],
+                    "required": ["category", "subcategory", "text"],
                 }
             },
         }
@@ -137,24 +150,55 @@ TOOLS = [
     },
     {
         "toolSpec": {
-            "name": "proxy_shell",
-            "description": "Execute a whitelisted shell command in the journal data directory for advanced operations.",
+            "name": "list_entries",
+            "description": "List today's journal entries with their line numbers. Call this BEFORE edit_entry or delete_entry to get accurate line numbers.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "edit_entry",
+            "description": "Edit an existing journal entry by its line number. Always call list_entries first to get the correct line number.",
             "inputSchema": {
                 "json": {
                     "type": "object",
                     "properties": {
-                        "command": {
-                            "type": "string",
-                            "description": "The shell command to run (e.g. 'grep -n \"gym\" journal/').",
+                        "line_number": {
+                            "type": "integer",
+                            "description": "The line number of the entry to edit (from list_entries output).",
                         },
-                        "require_review": {
-                            "type": "boolean",
-                            "description": "Set to true for destructive commands (sed -i, mv, rm) to show the user before execution.",
-                        }
+                        "new_text": {
+                            "type": "string",
+                            "description": "The replacement text for the entry (without the leading '- ').",
+                        },
                     },
-                    "required": ["command"],
+                    "required": ["line_number", "new_text"],
                 }
             },
         }
-    }
+    },
+    {
+        "toolSpec": {
+            "name": "delete_entry",
+            "description": "Delete a journal entry by its line number. Always call list_entries first to get the correct line number.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "line_number": {
+                            "type": "integer",
+                            "description": "The line number of the entry to delete (from list_entries output).",
+                        },
+                    },
+                    "required": ["line_number"],
+                }
+            },
+        }
+    },
 ]

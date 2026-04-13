@@ -48,6 +48,7 @@ class JournalStore:
         category: str,
         text: str,
         timestamp: datetime,
+        subcategory: str | None = None,
         mood: str | None = None,
     ) -> Path:
         """
@@ -62,7 +63,10 @@ class JournalStore:
 
         path = self._day_file(timestamp)
         lock_path = path.with_suffix(".lock")
-        entry_md = format_entry(text=text, timestamp=timestamp, category=category, mood=mood)
+        entry_md = format_entry(
+            text=text, timestamp=timestamp, category=category,
+            subcategory=subcategory, mood=mood,
+        )
 
         with FileLock(str(lock_path)):
             if not path.exists():
@@ -80,22 +84,102 @@ class JournalStore:
         """
         Insert `entry` as a new bullet under ## [CATEGORY].
         The entry is inserted at the end of the section (before the next ## or end of file).
+        Maintains a blank line between the last entry and the next section header.
         """
-        # Pattern: find the section header
         section_header = f"## [{category}]"
-        next_section_pattern = re.compile(r"\n## \[")
         pos = content.find(section_header)
         if pos == -1:
             raise ValueError(f"Section '{section_header}' not found in file")
 
         # Find end of this section (start of next ## or end of file)
         rest = content[pos + len(section_header):]
-        next_match = next_section_pattern.search(rest)
-        if next_match:
-            end_pos = pos + len(section_header) + next_match.start()
-        else:
-            end_pos = pos + len(content)
+        next_match = re.search(r"\n## \[", rest)
 
-        # Insert the entry at the end of the section
-        new_content = content[:end_pos] + "\n" + entry + content[end_pos:]
-        return new_content
+        if next_match:
+            # Insert before the next section header, preserving a blank line
+            end_pos = pos + len(section_header) + next_match.start()
+            # Strip trailing whitespace in the section, then add entry + blank line
+            before = content[:end_pos].rstrip()
+            after = content[end_pos:]  # starts with \n## [
+            return before + "\n" + entry + "\n" + after
+        else:
+            # Last section: append at end of file
+            before = content.rstrip()
+            return before + "\n" + entry + "\n"
+
+    # -------------------------------------------------------------------------
+    # Entry management (list / edit / delete by line number)
+    # -------------------------------------------------------------------------
+
+    def list_entries(self, date: datetime) -> str:
+        """Return all bullet entries with their 1-based line numbers."""
+        path = self._day_file(date)
+        if not path.exists():
+            return "No entries yet today."
+        lines = path.read_text().splitlines()
+        entries = []
+        for i, line in enumerate(lines, start=1):
+            if line.strip().startswith("- "):
+                entries.append(f"L{i}: {line.strip()}")
+        if not entries:
+            return "No entries yet today."
+        return "\n".join(entries)
+
+    # Pattern to match: - [TIME] [CATEGORY/subcategory] content *(mood: ...)*
+    _ENTRY_PATTERN = re.compile(
+        r"^- \[(?P<time>[^\]]+)\] \[(?P<tag>[^\]]+)\] (?P<content>.+?)(?:\s+\*\(mood: (?P<mood>[^)]+)\)\*)?$"
+    )
+
+    def edit_entry(self, date: datetime, line_number: int, new_text: str) -> str:
+        """Replace only the content of the entry at the given line, preserving time and category tags."""
+        path = self._day_file(date)
+        if not path.exists():
+            return "No journal file for today."
+
+        lock_path = path.with_suffix(".lock")
+        with FileLock(str(lock_path)):
+            lines = path.read_text().splitlines()
+            idx = line_number - 1  # 0-based
+
+            if idx < 0 or idx >= len(lines):
+                return f"Line {line_number} does not exist (file has {len(lines)} lines)."
+            if not lines[idx].strip().startswith("- "):
+                return f"Line {line_number} is not a bullet entry: '{lines[idx].strip()}'"
+
+            # Preserve existing time and category/subcategory tags
+            match = self._ENTRY_PATTERN.match(lines[idx].strip())
+            if match:
+                time_str = match.group("time")
+                tag = match.group("tag")
+                old_mood = match.group("mood")
+                # Rebuild with preserved prefix, new content, keep old mood if present
+                entry = f"- [{time_str}] [{tag}] {new_text}"
+                if old_mood:
+                    entry += f"  *(mood: {old_mood})*"
+                lines[idx] = entry
+            else:
+                # Fallback: old-format entry without tags, just replace content
+                lines[idx] = f"- {new_text}"
+
+            path.write_text("\n".join(lines) + "\n")
+        return f"Updated line {line_number}."
+
+    def delete_entry(self, date: datetime, line_number: int) -> str:
+        """Delete the entry at the given 1-based line number."""
+        path = self._day_file(date)
+        if not path.exists():
+            return "No journal file for today."
+
+        lock_path = path.with_suffix(".lock")
+        with FileLock(str(lock_path)):
+            lines = path.read_text().splitlines()
+            idx = line_number - 1
+
+            if idx < 0 or idx >= len(lines):
+                return f"Line {line_number} does not exist (file has {len(lines)} lines)."
+            if not lines[idx].strip().startswith("- "):
+                return f"Line {line_number} is not a bullet entry: '{lines[idx].strip()}'"
+
+            removed = lines.pop(idx)
+            path.write_text("\n".join(lines) + "\n")
+        return f"Deleted: {removed.strip()}"

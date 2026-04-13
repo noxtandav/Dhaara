@@ -1,14 +1,12 @@
 """
 Dhaara AI Agent.
-Handles the conversation loop with AWS Bedrock, including tool use.
+Handles the conversation loop with the AI provider, including tool use.
 """
-import json
 import logging
-import subprocess
 from datetime import datetime
-from pathlib import Path
+from zoneinfo import ZoneInfo
 
-from .bedrock import BedrockClient
+from .provider import AIProvider
 from .prompts import build_system_prompt, TOOLS
 from ..journal.store import JournalStore
 from ..config import load_config
@@ -22,9 +20,10 @@ MAX_TOOL_ROUNDS = 8
 
 
 class DhaaraAgent:
-    def __init__(self, bedrock: BedrockClient):
+    def __init__(self, ai: AIProvider, tz: ZoneInfo):
         config = load_config()
-        self._bedrock = bedrock
+        self._ai = ai
+        self._tz = tz
         self._data_dir = config.data_dir
         self._store = JournalStore(config.data_dir)
         self._state = ConversationState()
@@ -47,19 +46,19 @@ class DhaaraAgent:
         # Build Bedrock message list from history
         messages = self._build_messages(chat_id)
 
-        # Build system prompt with current silos + TELOS
-        system_prompt = build_system_prompt(self._data_dir)
+        # Build system prompt
+        system_prompt = build_system_prompt(self._tz)
 
         # Agentic loop: run until end_turn or max rounds
         tool_round = 0
         while tool_round < MAX_TOOL_ROUNDS:
-            response = self._bedrock.converse(
+            response = self._ai.converse(
                 messages=messages,
                 system_prompt=system_prompt,
                 tools=TOOLS,
             )
 
-            stop = self._bedrock.stop_reason(response)
+            stop = self._ai.stop_reason(response)
             assistant_content = response.get("output", {}).get("message", {}).get("content", [])
 
             # Append assistant turn to messages
@@ -74,7 +73,7 @@ class DhaaraAgent:
                 return final_response
 
             elif stop == "tool_use":
-                tool_uses = self._bedrock.extract_tool_uses(response)
+                tool_uses = self._ai.extract_tool_uses(response)
                 tool_results = []
 
                 for tool_use in tool_uses:
@@ -124,8 +123,12 @@ class DhaaraAgent:
                 return self._tool_read_today(input_data, timestamp)
             elif name == "read_telos":
                 return self._tool_read_telos(input_data)
-            elif name == "proxy_shell":
-                return self._tool_proxy_shell(input_data)
+            elif name == "list_entries":
+                return self._tool_list_entries(timestamp)
+            elif name == "edit_entry":
+                return self._tool_edit_entry(input_data, timestamp)
+            elif name == "delete_entry":
+                return self._tool_delete_entry(input_data, timestamp)
             else:
                 return f"Unknown tool: {name}"
         except Exception as e:
@@ -134,6 +137,7 @@ class DhaaraAgent:
 
     def _tool_record_entry(self, data: dict, timestamp: datetime) -> str:
         category = data["category"]
+        subcategory = data.get("subcategory")
         text = data["text"]
         mood = data.get("mood")
 
@@ -141,6 +145,7 @@ class DhaaraAgent:
             category=category,
             text=text,
             timestamp=timestamp,
+            subcategory=subcategory,
             mood=mood,
         )
         return "Entry recorded."  # English only
@@ -155,63 +160,14 @@ class DhaaraAgent:
         background = data["background"]
         return read_telos(self._data_dir, background)
 
-    def _tool_proxy_shell(self, data: dict) -> str:
-        """
-        Executes a whitelisted shell command in data_dir.
-        Args:
-            data: {"command": str, "require_review": bool}
-        Returns:
-            Output or confirmation prompt.
-        """
-        command = data["command"]
-        require_review = data.get("require_review", False)
-        
-        # 1. Validate command against whitelist
-        whitelist = {
-            "ls": {"-l", "-a"},
-            "grep": {"-r", "-n", "-i", "-v"},
-            "sed": {"-i", "-n", "-E"},
-            "awk": {},
-            "echo": {},
-            "cat": {},
-            "mv": {},
-            "cp": {},
-            "mkdir": {},
-            "nano": {}
-        }
-        cmd_parts = command.split()
-        if not cmd_parts or cmd_parts[0] not in whitelist:
-            return f"Command '{cmd_parts[0]}' not whitelisted."
+    def _tool_list_entries(self, timestamp: datetime) -> str:
+        return self._store.list_entries(timestamp)
 
-        # 2. Sanitize inputs
-        sanitized = []
-        for part in cmd_parts:
-            # Strip metacharacters
-            part = part.replace("$", "").replace("`", "").replace(">", "").replace("|", "").replace(";", "")
-            # Reject path traversal
-            if "../" in part or part.startswith("/"):
-                return f"Invalid path: {part}"
-            sanitized.append(part)
-        sanitized_cmd = " ".join(sanitized)
+    def _tool_edit_entry(self, data: dict, timestamp: datetime) -> str:
+        line_number = data["line_number"]
+        new_text = data["new_text"]
+        return self._store.edit_entry(timestamp, line_number, new_text)
 
-        # 3. Require review for destructive commands
-        if require_review or any(x in command for x in ["-i", ">>", "mv", "cp"]):
-            return f"Will run:\n```bash\n{sanitized_cmd}\n```\nProceed? (Y/n)"
-
-        # 4. Execute in data_dir
-        try:
-            result = subprocess.run(
-                sanitized_cmd,
-                cwd=self._data_dir,
-                shell=False,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            # 5. Log to .proxy_history
-            history_path = self._data_dir / ".proxy_history"
-            with open(history_path, "a") as f:
-                f.write(f"{datetime.now().isoformat()} | {sanitized_cmd}\n")
-            return result.stdout
-        except subprocess.CalledProcessError as e:
-            return f"Error: {e.stderr}"
+    def _tool_delete_entry(self, data: dict, timestamp: datetime) -> str:
+        line_number = data["line_number"]
+        return self._store.delete_entry(timestamp, line_number)

@@ -10,16 +10,16 @@ from telegram.ext import ContextTypes
 from telegram.constants import ChatAction
 
 from .auth import authorized_only
-from ..voice.sarvam import SarvamClient
-from ..ai.agent import DhaaraAgent
+from ..voice.provider import LanguageProvider
 
 logger = logging.getLogger(__name__)
 
 
 def make_handlers(
     authorized_user_id: int,
-    sarvam: SarvamClient,
-    agent: DhaaraAgent,
+    sarvam: LanguageProvider,
+    agent: "DhaaraAgent",
+    tz: ZoneInfo,
 ):
     """
     Returns (text_handler, voice_handler) coroutines bound to the given services.
@@ -33,7 +33,9 @@ def make_handlers(
 
         chat_id = message.chat_id
         raw_text = message.text.strip()
-        timestamp = message.date or datetime.now()  # Local timezone (naive fallback)
+        # Telegram sends UTC; convert to configured local timezone
+        utc_dt = message.date or datetime.now(timezone.utc)
+        timestamp = utc_dt.astimezone(tz)
 
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
@@ -63,7 +65,8 @@ def make_handlers(
             return
 
         chat_id = message.chat_id
-        timestamp = message.date or datetime.now()  # Local time
+        utc_dt = message.date or datetime.now(timezone.utc)
+        timestamp = utc_dt.astimezone(tz)
 
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 

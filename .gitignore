@@ -1,9 +1,10 @@
 # --- Secrets & Configs ---
 config.yaml
-config.yaml
-/localconfig
-secrets*.yaml
 config.custom.yaml                # Custom configuration: not in git
+
+# PM2
+ecosystem.config.js
+logs/
 
 # Virtual environments
 .venv/

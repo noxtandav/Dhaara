@@ -31,6 +31,8 @@ import logging
 import boto3
 from botocore.exceptions import ClientError
 
+from .provider import AIProvider
+
 logger = logging.getLogger(__name__)
 
 # Model ID substrings that are known to NOT support tool use.
@@ -91,7 +93,7 @@ def check_model_compatibility(model_id: str) -> None:
         )
 
 
-class BedrockClient:
+class BedrockClient(AIProvider):
     def __init__(self, model_id: str, region: str = "us-east-1", aws_profile: str | None = None):
         self.model_id = model_id
         check_model_compatibility(model_id)

@@ -10,6 +10,7 @@ Usage:
 import logging
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters
 
@@ -41,14 +42,15 @@ def main():
     logger.info("Data directory initialized.")
 
     # Initialize services
+    tz = ZoneInfo(config.timezone)
     sarvam = SarvamClient(api_key=config.sarvam.api_key)
     bedrock = BedrockClient(
         model_id=config.bedrock.model_id,
         region=config.bedrock.region,
         aws_profile=config.bedrock.aws_profile,
     )
-    agent = DhaaraAgent(bedrock=bedrock)
-    logger.info(f"Using Bedrock model: {config.bedrock.model_id}")
+    agent = DhaaraAgent(ai=bedrock, tz=tz)
+    logger.info(f"Using Bedrock model: {config.bedrock.model_id} | Timezone: {config.timezone}")
 
     # Build Telegram app
     app = ApplicationBuilder().token(config.telegram.bot_token).build()
@@ -59,6 +61,7 @@ def main():
         authorized_user_id=uid,
         sarvam=sarvam,
         agent=agent,
+        tz=tz,
     )
 
     app.add_handler(CommandHandler("start", handle_start))

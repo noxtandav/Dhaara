@@ -32,6 +32,7 @@ class Config:
     bedrock: BedrockConfig
     sarvam: SarvamConfig
     data_dir: Path
+    timezone: str
 
 
 def load_config(config_path: str | Path | None = None) -> Config:
@@ -74,6 +75,9 @@ def load_config(config_path: str | Path | None = None) -> Config:
     data_dir_raw = raw.get("data_dir", "~/PAI/DhaaraData")
     data_dir = Path(os.path.expanduser(data_dir_raw))
 
+    # Timezone (default: Asia/Kolkata)
+    tz_name = raw.get("timezone", "Asia/Kolkata")
+
     return Config(
         telegram=TelegramConfig(
             bot_token=tg["bot_token"],
@@ -86,4 +90,5 @@ def load_config(config_path: str | Path | None = None) -> Config:
         ),
         sarvam=SarvamConfig(api_key=sv["api_key"]),
         data_dir=data_dir,
+        timezone=tz_name,
     )

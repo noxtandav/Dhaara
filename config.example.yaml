@@ -6,6 +6,10 @@ telegram:
 # Keep this outside the project so future PAI agents can share it.
 data_dir: "~/PAI/DhaaraData"
 
+# IANA timezone for timestamps in journal entries.
+# See: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+timezone: "Asia/Kolkata"
+
 bedrock:
   # AWS Bedrock model ID - user-configurable.
   # Dhaara uses the Bedrock Converse API — a unified interface across all models.

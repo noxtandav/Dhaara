@@ -11,24 +11,16 @@ Text flow:
   - If not English, translate to English via translate API
   - Return: (english_text, detected_lang_code, original_text)
 """
-import io
 import tempfile
 import os
-from dataclasses import dataclass
-from pathlib import Path
 
 from sarvamai import SarvamAI
 from sarvamai.core.api_error import ApiError
 
-
-@dataclass
-class ProcessedInput:
-    english_text: str
-    language_code: str     # BCP-47, e.g. "hi-IN", "en-IN"
-    original_text: str     # Original transcription/text before translation
+from .provider import LanguageProvider, ProcessedInput
 
 
-class SarvamClient:
+class SarvamClient(LanguageProvider):
     def __init__(self, api_key: str):
         self._client = SarvamAI(api_subscription_key=api_key)
 
