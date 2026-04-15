@@ -13,10 +13,11 @@ Dhaara is the first agent in the **PAI (Personal AI)** ecosystem — a set of ag
 Most journaling apps ask you to sit down, open a page, and write. Most of us don't. Life happens in the gaps — in the auto ride, between meetings, while making chai. Dhaara lives in the one app you already check a hundred times a day: **Telegram**.
 
 - 🎙️ **Voice-first.** Ramble in Hindi, Tamil, Marathi, English — or a mix. Dhaara understands.
-- 🧠 **Agentic, not a form.** It decides where your entry belongs, extracts mood, tags, and expenses, and asks smart questions when unsure.
-- 📂 **Silo-based organisation.** Work, Personal, Habits, Finance, Health… auto-routed. New silos suggested when your life grows a new branch.
-- 💰 **Automatic expense ledger.** "Spent 30 on milk, 150 on auto" becomes a structured table you can query.
-- 🎯 **TELOS-aware.** You give it your goals and priorities; it reads entries in that context.
+- 🧠 **Agentic, not a form.** It classifies each entry, extracts mood and a free-form subcategory tag, and can edit or delete past entries when you ask.
+- 📒 **One file per day.** Every day is a single markdown file with four sections — **WORK**, **PERSONAL**, **HABITS**, **FINANCE** — and timestamped bullet entries inside each.
+- 🏷️ **Inline tags for free.** Every bullet carries its own `[time] [CATEGORY/subcategory]` prefix and optional `*(mood: ...)*`, so each line is a self-contained chunk that's perfect for RAG later.
+- 💰 **Automatic expense capture.** "Spent 30 on milk, 150 on auto" lands as entries under `FINANCE/groceries` and `FINANCE/transport`.
+- 🎯 **TELOS-aware.** You give it your goals and priorities in `_telos/` and the agent reads entries in that context.
 - 🗂️ **Your data, your disk.** Plain markdown files. No cloud lock-in. No database. `grep` just works.
 - 🔓 **BYO-model.** Runs on **AWS Bedrock** *or* **OpenRouter** — pick Claude, Nova, Mistral, Gemini, Llama, whatever you like.
 - 👤 **Single-user by design.** The bot answers to exactly one Telegram ID — yours.
@@ -27,19 +28,24 @@ Most journaling apps ask you to sit down, open a page, and write. Most of us don
 
 ```
 you:   spent 30 on milk, 20 on cold drink, 150 on auto today
-bot:   logged in Finance · ₹200 total · tagged: groceries, transport
+bot:   Recorded to [FINANCE].
+       (three bullets added under FINANCE/groceries and FINANCE/transport)
 
 you:   [voice note in Hindi] aaj kaafi thaka hua hoon, kaam pe focus nahi ho paa raha
-bot:   noted in Personal · mood: low · would you like to capture anything about what's draining you?
+bot:   Recorded to [PERSONAL]. (mood: tired)
 
-you:   worked on dhaara for 2 hrs, phase 1 is nearly done 🎉
-bot:   logged in Work · tagged: dhaara, milestone
+you:   worked on dhaara for 2 hrs, phase 1 is nearly done
+bot:   Recorded to [WORK].
 
-you:   /summary today
-bot:   [tomorrow, after Phase 2]
+you:   what did I eat today?
+bot:   L12: - [1:30 PM] [FINANCE/food] Spent ₹150 on lunch
+       L18: - [8:10 PM] [FINANCE/food] Ordered dinner from Swiggy ₹420
+
+you:   delete the swiggy one
+bot:   Deleted: - [8:10 PM] [FINANCE/food] Ordered dinner from Swiggy ₹420
 ```
 
-Every entry lands as a timestamped markdown section in one file per silo per day. Nothing hidden. Nothing proprietary.
+Every entry is appended to today's single markdown file under the right section. Nothing hidden. Nothing proprietary. Every bullet is timestamped and tagged inline, so the file itself is both a journal and an index.
 
 ---
 
@@ -176,32 +182,54 @@ Also enable your model in **AWS Console → Bedrock → Model access**.
 
 ## How your data is stored
 
-Everything lives under `data_dir` (default `~/PAI/DhaaraData/`) — deliberately outside the repo so future PAI agents can share it.
+Journal data lives under `data_dir` (default `~/PAI/DhaaraData/`). TELOS context lives alongside it under `_telos/` (by default `<data_dir>/../_telos`) so every future PAI agent can share the same personal context.
 
 ```
-DhaaraData/
-├── _config/
-│   └── silos.yaml          # silo definitions (edited by the agent)
-├── _telos/
-│   ├── work.md             # your goals / context — you write these
+~/PAI/
+├── _telos/                     # shared across all PAI agents
+│   ├── work.md                 # you edit these
 │   └── personal.md
-├── Work/
-│   └── 2026-04-15.md
-├── Personal/
-│   └── 2026-04-15.md
-├── Habits/
-│   └── 2026-04-15.md
-└── Finance/
-    └── 2026-04-15.md
+└── DhaaraData/
+    └── journal/
+        ├── 2026-04-14.md
+        ├── 2026-04-15.md
+        └── 2026-04-16.md
 ```
 
-**One file per silo per day.** Each entry is a timestamped section with mood, tags, and — for Finance — a structured expense table. All reads and writes are sandboxed to this directory.
+**One file per day — that's it.** Inside each daily file, four fixed sections hold everything:
+
+```markdown
+# 2026-04-15 Journal
+
+## [WORK]
+- [10:32 AM] [WORK/meetings] Had standup with the team
+- [2:15 PM] [WORK/coding] Finished the API refactor  *(mood: satisfied)*
+
+## [PERSONAL]
+- [9:00 AM] [PERSONAL/family] Had breakfast with family  *(mood: happy)*
+- [11:00 PM] [PERSONAL/health] Couldn't sleep, felt anxious  *(mood: anxious)*
+
+## [HABITS]
+- [7:00 AM] [HABITS/exercise] Gym: 45 mins
+- [10:00 PM] [HABITS/sleep] Sleep: 7 hours
+
+## [FINANCE]
+- [1:30 PM] [FINANCE/food] Spent ₹150 on lunch
+- [6:00 PM] [FINANCE/groceries] Bought vegetables ₹300
+- [8:00 PM] [FINANCE/rent] Paid rent ₹15,000
+```
+
+- **Four fixed categories**: `WORK`, `PERSONAL`, `HABITS`, `FINANCE`. The agent picks exactly one for each entry.
+- **Free-form subcategories**: lowercase tags the agent invents as needed — `meetings`, `coding`, `groceries`, `rent`, `hiring`, `gifts`… whatever fits.
+- **Inline metadata per bullet**: `[time]`, `[CATEGORY/subcategory]`, and optional `*(mood: ...)*`. Each line stands on its own — great for future RAG.
+- **Safe by construction**: the journal store resolves every path inside `data_dir` and rejects anything that tries to escape.
+- **Concurrent-safe**: file-locked writes via `filelock`, so the agent can append, edit, and delete entries without races.
 
 ---
 
 ## TELOS — give the agent context
 
-TELOS is a personal-context framework from Daniel Miessler. Drop your work and life priorities into `_telos/work.md` and `_telos/personal.md`, and Dhaara will reason about your entries in that light. Example:
+TELOS is a personal-context framework from Daniel Miessler. Drop your work and life priorities into `_telos/work.md` and `_telos/personal.md` (by default in `<data_dir>/../_telos/`, shared across all PAI agents), and Dhaara will reason about your entries in that light. Example:
 
 ```markdown
 # Work TELOS
@@ -228,9 +256,9 @@ Telegram  ──►  Sarvam AI  ──►  AI Agent  ──►  Journal Store
 Key design choices:
 
 - **Provider abstraction** — `src/ai/provider.py` lets you plug in new AI backends without touching the agent loop.
-- **Proxy shell** — silo edits go through a constrained tool interface; the model cannot escape `data_dir`.
+- **Typed tool interface** — the agent can only call a small, audited set of tools: `record_entry`, `read_today`, `read_day`, `read_telos`, `list_entries`, `edit_entry`, `delete_entry`. Every path is resolved inside `data_dir`; traversal attempts are rejected.
 - **Local timezone** — timestamps honour whatever IANA zone you set in `config.yaml`.
-- **Stateless per conversation** — `/clear` resets context; your data is the long-term memory.
+- **Stateless per conversation** — `/clear` resets context; your daily markdown files are the long-term memory.
 
 ---
 
@@ -247,7 +275,7 @@ Everything else is an entry or a conversation.
 
 ## Roadmap
 
-- **Phase 1** ✅ — Journaling, voice, multilingual, expense extraction, silo routing
+- **Phase 1** ✅ — Journaling, voice, multilingual, expense extraction, category classification, edit/delete by line number
 - **Phase 2** 🚧 — RAG retrieval ("what did I write about dhaara last month?"), entry editing, daily/weekly summaries
 - **Phase 3** 🔭 — Mood trends, habit dashboards, growth analysis, cross-agent workflows in the wider PAI ecosystem
 
@@ -258,7 +286,7 @@ Everything else is an entry or a conversation.
 Contributions are very welcome. Open an issue first for anything non-trivial so we can align on direction. Good first areas:
 
 - Adding new AI providers (Anthropic direct, Gemini direct, local Ollama)
-- New silo templates (Health, Reading, Relationships)
+- Phase 2 features: RAG retrieval over past entries, daily / weekly summaries
 - Better expense parsing across currencies
 - Tests — we need them
 
