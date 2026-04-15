@@ -107,7 +107,7 @@ def make_handlers(
     async def handle_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /clear command — clears conversation history."""
         if update.message:
-            agent._state.clear(update.message.chat_id)
+            agent.clear_history(update.message.chat_id)
             await update.message.reply_text("Conversation history cleared.")
 
     return handle_text, handle_voice, handle_start, handle_clear

@@ -207,7 +207,14 @@ def _openai_response_to_bedrock(data: dict) -> dict:
             },
         })
 
-    stop_reason = "tool_use" if finish == "tool_calls" else "end_turn"
+    if finish == "tool_calls":
+        stop_reason = "tool_use"
+    elif finish in ("stop", "end_turn", None):
+        stop_reason = "end_turn"
+    else:
+        # length, content_filter, refusal, function_call, etc.
+        # Surface as-is so the agent loop can fail honestly instead of pretending it ended cleanly.
+        stop_reason = finish
 
     return {
         "output": {"message": {"content": content_blocks}},

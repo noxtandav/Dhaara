@@ -72,11 +72,13 @@ Subcategories are free-form lowercase words. Use the common ones above when they
 
 8. CONFIRMATION: After recording, tell the user briefly: "Recorded to [CATEGORY]."
 
+   CRITICAL: Never tell the user an entry was recorded, edited, or deleted unless you actually called `record_entry`, `edit_entry`, or `delete_entry` in this same turn AND received a success result from the tool. If a tool failed or you did not call it, say so explicitly — do NOT fabricate a confirmation. The user is relying on you for accuracy.
+
 9. CONVERSATION: You can also just chat — not everything is a journal entry.
 
 10. LANGUAGE: The user may write in English or Indian languages. You will always receive their message already translated to English. Respond in English — the bot handles translation.
 
-11. EDITING/DELETING: When the user wants to edit or delete an entry, ALWAYS call list_entries first to get current line numbers. Never guess line numbers — they shift after every edit or delete.
+11. EDITING/DELETING: When the user wants to edit or delete an entry, ALWAYS call list_entries first to get current line numbers. Never guess line numbers — they shift after every edit or delete. When the entry is from a past day, pass the same `date` (YYYY-MM-DD) to `edit_entry`/`delete_entry` that you passed to `list_entries` — otherwise you will edit the wrong day's file.
 
 12. LISTING: When showing entries to the user, relay the list_entries output EXACTLY as-is. Do NOT summarize, reformat, or drop any fields (time, category, subcategory). The user expects to see the full metadata.
 
@@ -187,7 +189,7 @@ TOOLS = [
     {
         "toolSpec": {
             "name": "edit_entry",
-            "description": "Edit an existing journal entry by its line number. Always call list_entries first to get the correct line number.",
+            "description": "Edit an existing journal entry by its line number. Always call list_entries first to get the correct line number, and pass the SAME date you passed to list_entries.",
             "inputSchema": {
                 "json": {
                     "type": "object",
@@ -200,6 +202,10 @@ TOOLS = [
                             "type": "string",
                             "description": "The replacement text for the entry (without the leading '- ').",
                         },
+                        "date": {
+                            "type": "string",
+                            "description": "Date in YYYY-MM-DD format identifying which day's file to edit. Omit only if editing today's file. Must match the date used in the preceding list_entries call.",
+                        },
                     },
                     "required": ["line_number", "new_text"],
                 }
@@ -209,7 +215,7 @@ TOOLS = [
     {
         "toolSpec": {
             "name": "delete_entry",
-            "description": "Delete a journal entry by its line number. Always call list_entries first to get the correct line number.",
+            "description": "Delete a journal entry by its line number. Always call list_entries first to get the correct line number, and pass the SAME date you passed to list_entries.",
             "inputSchema": {
                 "json": {
                     "type": "object",
@@ -217,6 +223,10 @@ TOOLS = [
                         "line_number": {
                             "type": "integer",
                             "description": "The line number of the entry to delete (from list_entries output).",
+                        },
+                        "date": {
+                            "type": "string",
+                            "description": "Date in YYYY-MM-DD format identifying which day's file to delete from. Omit only if deleting from today's file. Must match the date used in the preceding list_entries call.",
                         },
                     },
                     "required": ["line_number"],

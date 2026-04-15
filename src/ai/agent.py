@@ -1,22 +1,23 @@
 """
 Dhaara AI Agent.
-Handles the conversation loop with the AI provider, including tool use.
+
+Thin wrapper that builds the LangGraph state machine in `graph.py` and
+exposes per-tool implementations + a `handle_message` entry point for the
+Telegram bot layer. The agent loop logic lives in the graph; this module
+owns tool dispatch, language tracking, and the journal store.
 """
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .provider import AIProvider
-from .prompts import build_system_prompt, TOOLS
+from .prompts import build_system_prompt
+from .graph import build_graph
 from ..journal.store import JournalStore
 from ..config import load_config
 from ..context.telos import read_telos
-from ..context.state import ConversationState, Message
 
 logger = logging.getLogger(__name__)
-
-# Maximum tool-use rounds per user message (safety limit)
-MAX_TOOL_ROUNDS = 8
 
 
 class DhaaraAgent:
@@ -27,7 +28,14 @@ class DhaaraAgent:
         self._data_dir = config.data_dir
         self._telos_dir = config.telos_dir
         self._store = JournalStore(config.data_dir)
-        self._state = ConversationState()
+        self._lang: dict[int, str] = {}
+
+        checkpoint_path = config.data_dir / "checkpoints.db"
+        self._graph = build_graph(
+            ai=ai,
+            execute_tool=self._execute_tool,
+            checkpoint_path=checkpoint_path,
+        )
 
     def handle_message(
         self,
@@ -40,80 +48,31 @@ class DhaaraAgent:
         Process a user message (already in English) and return the agent's response (in English).
         The bot layer translates the response back to the user's language via Sarvam.
         """
-        # Add user message to history
-        self._state.add_message(chat_id, "user", user_text)
-        self._state.set_language(chat_id, detected_lang)
+        self._lang[chat_id] = detected_lang
 
-        # Build Bedrock message list from history
-        messages = self._build_messages(chat_id)
+        # Per-message inputs: append the user turn (reducer concatenates),
+        # reset per-call counters, and overwrite the system prompt + timestamp.
+        graph_input = {
+            "messages": [{"role": "user", "content": [{"text": user_text}]}],
+            "system_prompt": build_system_prompt(self._tz),
+            "timestamp_iso": timestamp.isoformat(),
+            "tool_round": 0,
+            "mutating_tool_called": False,
+            "last_stop_reason": "",
+            "final_response": None,
+        }
+        config = {"configurable": {"thread_id": str(chat_id)}}
 
-        # Build system prompt
-        system_prompt = build_system_prompt(self._tz)
+        final_state = self._graph.invoke(graph_input, config=config)
+        return final_state.get("final_response") or "I couldn't save that — please try again."
 
-        # Agentic loop: run until end_turn or max rounds
-        tool_round = 0
-        while tool_round < MAX_TOOL_ROUNDS:
-            response = self._ai.converse(
-                messages=messages,
-                system_prompt=system_prompt,
-                tools=TOOLS,
-            )
+    def get_language(self, chat_id: int) -> str:
+        return self._lang.get(chat_id, "en")
 
-            stop = self._ai.stop_reason(response)
-            assistant_content = response.get("output", {}).get("message", {}).get("content", [])
-
-            # Append assistant turn to messages
-            messages.append({"role": "assistant", "content": assistant_content})
-
-            if stop == "end_turn":
-                # Extract final text response
-                text_parts = [b["text"] for b in assistant_content if "text" in b]
-                final_response = "\n".join(text_parts)
-                # Save to conversation history
-                self._state.add_message(chat_id, "assistant", final_response)
-                return final_response
-
-            elif stop == "tool_use":
-                tool_uses = self._ai.extract_tool_uses(response)
-                tool_results = []
-
-                for tool_use in tool_uses:
-                    result = self._execute_tool(
-                        name=tool_use["name"],
-                        input_data=tool_use["input"],
-                        timestamp=timestamp,
-                    )
-                    tool_results.append({
-                        "toolUseId": tool_use["toolUseId"],
-                        "content": [{"text": result}],
-                    })
-
-                # Add tool results as user turn
-                messages.append({
-                    "role": "user",
-                    "content": [{"toolResult": tr} for tr in tool_results],
-                })
-                tool_round += 1
-
-            else:
-                # Unexpected stop reason
-                break
-
-        # Fallback if we hit max rounds
-        final_response = "Entry recorded."  # Always return English
-        self._state.add_message(chat_id, "assistant", final_response)
-        return final_response
-
-    def _build_messages(self, chat_id: int) -> list[dict]:
-        """Convert conversation history to Bedrock message format."""
-        history = self._state.get_history(chat_id)
-        messages = []
-        for msg in history:
-            messages.append({
-                "role": msg.role,
-                "content": [{"text": msg.content}],
-            })
-        return messages
+    def clear_history(self, chat_id: int) -> None:
+        """Drop the persisted conversation thread for this chat."""
+        self._graph.checkpointer.delete_thread(str(chat_id))
+        self._lang.pop(chat_id, None)
 
     def _execute_tool(self, name: str, input_data: dict, timestamp: datetime) -> str:
         """Execute a tool call and return the result as a string."""
@@ -139,38 +98,28 @@ class DhaaraAgent:
             return f"Error executing {name}: {str(e)}"
 
     def _tool_record_entry(self, data: dict, timestamp: datetime) -> str:
-        category = data["category"]
-        subcategory = data.get("subcategory")
-        text = data["text"]
-        mood = data.get("mood")
-
-        path = self._store.append_entry(
-            category=category,
-            text=text,
+        self._store.append_entry(
+            category=data["category"],
+            text=data["text"],
             timestamp=timestamp,
-            subcategory=subcategory,
-            mood=mood,
+            subcategory=data.get("subcategory"),
+            mood=data.get("mood"),
         )
-        return "Entry recorded."  # English only
+        return "Entry recorded."
 
     def _tool_read_today(self, data: dict, timestamp: datetime) -> str:
         content = self._store.read_day(timestamp)
-        if content is None:
-            return "No entries yet."  # English only
-        return content
+        return content if content is not None else "No entries yet."
 
     def _tool_read_day(self, data: dict) -> str:
         date = self._parse_date(data["date"])
         if date is None:
             return f"Invalid date format: '{data['date']}'. Use YYYY-MM-DD."
         content = self._store.read_day(date)
-        if content is None:
-            return f"No entries for {data['date']}."
-        return content
+        return content if content is not None else f"No entries for {data['date']}."
 
     def _tool_read_telos(self, data: dict) -> str:
-        background = data["background"]
-        return read_telos(self._telos_dir, background)
+        return read_telos(self._telos_dir, data["background"])
 
     def _tool_list_entries(self, data: dict, timestamp: datetime) -> str:
         date_str = data.get("date")
@@ -188,10 +137,23 @@ class DhaaraAgent:
             return None
 
     def _tool_edit_entry(self, data: dict, timestamp: datetime) -> str:
-        line_number = data["line_number"]
-        new_text = data["new_text"]
-        return self._store.edit_entry(timestamp, line_number, new_text)
+        target = self._resolve_target_date(data.get("date"), timestamp)
+        if isinstance(target, str):
+            return target
+        return self._store.edit_entry(target, data["line_number"], data["new_text"])
 
     def _tool_delete_entry(self, data: dict, timestamp: datetime) -> str:
-        line_number = data["line_number"]
-        return self._store.delete_entry(timestamp, line_number)
+        target = self._resolve_target_date(data.get("date"), timestamp)
+        if isinstance(target, str):
+            return target
+        return self._store.delete_entry(target, data["line_number"])
+
+    def _resolve_target_date(self, date_str: str | None, fallback: datetime) -> datetime | str:
+        """Parse a YYYY-MM-DD `date` arg, falling back to today's timestamp if omitted.
+        Returns a datetime on success, or an error string the tool result can pass back."""
+        if not date_str:
+            return fallback
+        parsed = self._parse_date(date_str)
+        if parsed is None:
+            return f"Invalid date format: '{date_str}'. Use YYYY-MM-DD."
+        return parsed
