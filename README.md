@@ -298,4 +298,4 @@ MIT — see `LICENSE`. Use it, fork it, make it yours.
 
 ---
 
-*Built in Bengaluru. Named for the quiet stream of thoughts we all carry.*
+*Built in India. Named for the quiet stream of thoughts we all carry.*
