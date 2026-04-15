@@ -131,6 +131,24 @@ TOOLS = [
     },
     {
         "toolSpec": {
+            "name": "read_day",
+            "description": "Read all entries from a past day's journal file. Use this for 'yesterday' or any specific date. Compute the date yourself from today's date shown in the system prompt.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "date": {
+                            "type": "string",
+                            "description": "Date in YYYY-MM-DD format (e.g. '2026-04-14' for yesterday if today is 2026-04-15).",
+                        }
+                    },
+                    "required": ["date"],
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
             "name": "read_telos",
             "description": "Read the TELOS background file for work or personal context.",
             "inputSchema": {
@@ -151,11 +169,16 @@ TOOLS = [
     {
         "toolSpec": {
             "name": "list_entries",
-            "description": "List today's journal entries with their line numbers. Call this BEFORE edit_entry or delete_entry to get accurate line numbers.",
+            "description": "List journal entries with their line numbers. Defaults to today. Pass a date to list a past day's entries. Call this BEFORE edit_entry or delete_entry to get accurate line numbers.",
             "inputSchema": {
                 "json": {
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "date": {
+                            "type": "string",
+                            "description": "Optional date in YYYY-MM-DD format. Omit for today.",
+                        }
+                    },
                     "required": [],
                 }
             },

@@ -25,6 +25,7 @@ class DhaaraAgent:
         self._ai = ai
         self._tz = tz
         self._data_dir = config.data_dir
+        self._telos_dir = config.telos_dir
         self._store = JournalStore(config.data_dir)
         self._state = ConversationState()
 
@@ -121,10 +122,12 @@ class DhaaraAgent:
                 return self._tool_record_entry(input_data, timestamp)
             elif name == "read_today":
                 return self._tool_read_today(input_data, timestamp)
+            elif name == "read_day":
+                return self._tool_read_day(input_data)
             elif name == "read_telos":
                 return self._tool_read_telos(input_data)
             elif name == "list_entries":
-                return self._tool_list_entries(timestamp)
+                return self._tool_list_entries(input_data, timestamp)
             elif name == "edit_entry":
                 return self._tool_edit_entry(input_data, timestamp)
             elif name == "delete_entry":
@@ -156,12 +159,33 @@ class DhaaraAgent:
             return "No entries yet."  # English only
         return content
 
+    def _tool_read_day(self, data: dict) -> str:
+        date = self._parse_date(data["date"])
+        if date is None:
+            return f"Invalid date format: '{data['date']}'. Use YYYY-MM-DD."
+        content = self._store.read_day(date)
+        if content is None:
+            return f"No entries for {data['date']}."
+        return content
+
     def _tool_read_telos(self, data: dict) -> str:
         background = data["background"]
-        return read_telos(self._data_dir, background)
+        return read_telos(self._telos_dir, background)
 
-    def _tool_list_entries(self, timestamp: datetime) -> str:
+    def _tool_list_entries(self, data: dict, timestamp: datetime) -> str:
+        date_str = data.get("date")
+        if date_str:
+            date = self._parse_date(date_str)
+            if date is None:
+                return f"Invalid date format: '{date_str}'. Use YYYY-MM-DD."
+            return self._store.list_entries(date)
         return self._store.list_entries(timestamp)
+
+    def _parse_date(self, date_str: str) -> datetime | None:
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=self._tz)
+        except (ValueError, TypeError):
+            return None
 
     def _tool_edit_entry(self, data: dict, timestamp: datetime) -> str:
         line_number = data["line_number"]

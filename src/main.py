@@ -17,6 +17,8 @@ from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, fil
 from .config import load_config
 from .voice.sarvam import SarvamClient
 from .ai.bedrock import BedrockClient
+from .ai.openrouter import OpenRouterClient
+from .ai.provider import AIProvider
 from .ai.agent import DhaaraAgent
 from .bot.handler import make_handlers
 from .context.telos import init_telos_files
@@ -38,19 +40,33 @@ def main():
     logger.info(f"Starting Dhaara. Data dir: {config.data_dir}")
 
     # Initialize data directory structure
-    init_telos_files(config.data_dir)
+    init_telos_files(config.telos_dir)
     logger.info("Data directory initialized.")
 
     # Initialize services
     tz = ZoneInfo(config.timezone)
     sarvam = SarvamClient(api_key=config.sarvam.api_key)
-    bedrock = BedrockClient(
-        model_id=config.bedrock.model_id,
-        region=config.bedrock.region,
-        aws_profile=config.bedrock.aws_profile,
-    )
-    agent = DhaaraAgent(ai=bedrock, tz=tz)
-    logger.info(f"Using Bedrock model: {config.bedrock.model_id} | Timezone: {config.timezone}")
+    ai: AIProvider
+    if config.ai_provider == "bedrock":
+        ai = BedrockClient(
+            model_id=config.bedrock.model_id,
+            region=config.bedrock.region,
+            aws_profile=config.bedrock.aws_profile,
+        )
+        model_label = f"Bedrock model: {config.bedrock.model_id}"
+    elif config.ai_provider == "openrouter":
+        ai = OpenRouterClient(
+            model=config.openrouter.model,
+            api_key=config.openrouter.api_key,
+            referer=config.openrouter.referer,
+            app_title=config.openrouter.app_title,
+        )
+        model_label = f"OpenRouter model: {config.openrouter.model}"
+    else:
+        raise ValueError(f"Unsupported ai.provider: {config.ai_provider}")
+
+    agent = DhaaraAgent(ai=ai, tz=tz)
+    logger.info(f"Using {model_label} | Timezone: {config.timezone}")
 
     # Build Telegram app
     app = ApplicationBuilder().token(config.telegram.bot_token).build()

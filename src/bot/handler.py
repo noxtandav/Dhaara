@@ -50,13 +50,7 @@ def make_handlers(
             detected_lang=processed.language_code,
         )
 
-        # Always translate response via Sarvam
-        if processed.language_code:
-            reply = sarvam.translate_to_language(english_response, processed.language_code)
-        else:
-            reply = english_response  # Fallback to English
-
-        await message.reply_text(reply)
+        await message.reply_text(english_response)
 
     @authorized_only(authorized_user_id)
     async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -96,13 +90,7 @@ def make_handlers(
             detected_lang=processed.language_code,
         )
 
-        # Always translate response via Sarvam
-        if processed.language_code:
-            reply = sarvam.translate_to_language(english_response, processed.language_code)
-        else:
-            reply = english_response  # Fallback to English
-
-        await message.reply_text(reply)
+        await message.reply_text(english_response)
 
     @authorized_only(authorized_user_id)
     async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -1,6 +1,7 @@
 """
-Read TELOS background files from data_dir/_telos/.
+Read TELOS background files from a shared _telos/ directory.
 These are manually maintained markdown files the agent reads for context.
+TELOS is shared across all PAI agents — it lives in the PAI data root, not per-agent.
 """
 from pathlib import Path
 
@@ -49,9 +50,8 @@ TELOS_EXAMPLE_PERSONAL = """\
 """
 
 
-def init_telos_files(data_dir: Path) -> None:
+def init_telos_files(telos_dir: Path) -> None:
     """Create example TELOS files if they don't exist."""
-    telos_dir = data_dir / "_telos"
     telos_dir.mkdir(parents=True, exist_ok=True)
 
     work_file = telos_dir / "work.md"
@@ -63,22 +63,21 @@ def init_telos_files(data_dir: Path) -> None:
         personal_file.write_text(TELOS_EXAMPLE_PERSONAL)
 
 
-def read_telos(data_dir: Path, background: str) -> str:
+def read_telos(telos_dir: Path, background: str) -> str:
     """
     Read a TELOS background file.
     background: 'work' or 'personal' (case-insensitive)
     Returns file content or a message if not found.
     """
     name = background.lower().strip()
-    path = data_dir / "_telos" / f"{name}.md"
+    path = telos_dir / f"{name}.md"
     if path.exists():
         return path.read_text()
     return f"(No TELOS file found for '{background}'. Create {path} to add context.)"
 
 
-def read_all_telos(data_dir: Path) -> str:
+def read_all_telos(telos_dir: Path) -> str:
     """Read all TELOS files and concatenate for system prompt injection."""
-    telos_dir = data_dir / "_telos"
     if not telos_dir.exists():
         return "(No TELOS backgrounds found.)"
 
