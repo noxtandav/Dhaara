@@ -307,7 +307,16 @@ Contributions are very welcome. Open an issue first for anything non-trivial so 
 - Adding new AI providers (Anthropic direct, Gemini direct, local Ollama)
 - Phase 2 features: RAG retrieval over past entries, daily / weekly summaries
 - Better expense parsing across currencies
-- Tests — we need them
+- More tests (see below)
+
+### Running tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The suite lives in `tests/` and covers the journal formatter and the export script. Pure unit tests, no fixtures or network — they run in well under a second.
 
 ---
 
