@@ -1,5 +1,7 @@
 # Dhaara
 
+[![Tests](https://github.com/noxtandav/Dhaara/actions/workflows/test.yml/badge.svg)](https://github.com/noxtandav/Dhaara/actions/workflows/test.yml)
+
 > *Dhaara* (धारा) — a stream, a current, a flow.
 
 **Your personal journal, as a conversation.** Talk to it on Telegram — by voice or text, in English or any Indian language — and Dhaara quietly turns your thoughts into a well-organised, searchable archive of your life. No apps to open. No forms to fill. Just talk.
@@ -333,7 +335,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite lives in `tests/` and covers the journal formatter and the export script. Pure unit tests, no fixtures or network — they run in well under a second.
+The suite lives in `tests/` and covers the journal formatter, the export script, and the stats roll-up. Pure unit tests, no fixtures or network — 80+ tests in under a second. CI runs them on every push and PR against Python 3.11, 3.12, and 3.13 (see `.github/workflows/test.yml`).
 
 ---
 
