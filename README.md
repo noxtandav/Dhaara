@@ -290,6 +290,23 @@ python scripts/export_journal.py --from 2026-04-01 --to 2026-04-30 -f json
 
 It parses every `[time]`, `[CATEGORY/subcategory]`, mood, and text into one row per bullet — no extra dependencies beyond the standard library (PyYAML is used only if you let it auto-discover `data_dir` from `config.yaml`).
 
+### Quick stats
+
+For a roll-up instead of raw rows, there's `scripts/stats.py`. It reuses the same parser and prints per-category counts, finance totals (with subcategory breakdown + top expenses), habit streaks, and mood distribution:
+
+```bash
+# Last 30 days, human-readable report
+python scripts/stats.py --since 30d
+
+# JSON for piping into a dashboard
+python scripts/stats.py --since 30d -f json
+
+# Habits-only view
+python scripts/stats.py --category HABITS
+```
+
+Currency parsing is best-effort — it understands `₹`, `Rs`, `$`, and bare numbers in FINANCE entries, plus `k`, `lakh`/`lac`, and `cr`/`crore` multipliers.
+
 ---
 
 ## Roadmap
