@@ -170,6 +170,183 @@ class TestDefaultRange:
 
 
 # ---------------------------------------------------------------------------
+# previous_period
+# ---------------------------------------------------------------------------
+
+class TestPreviousPeriod:
+    def test_seven_day_window(self):
+        prev_start, prev_end = weekly_summary.previous_period(
+            date(2026, 4, 13), date(2026, 4, 19)
+        )
+        assert prev_end == date(2026, 4, 12)
+        assert prev_start == date(2026, 4, 6)
+        assert (prev_end - prev_start).days == 6
+
+    def test_one_day_window(self):
+        prev_start, prev_end = weekly_summary.previous_period(
+            date(2026, 4, 15), date(2026, 4, 15)
+        )
+        assert prev_start == date(2026, 4, 14)
+        assert prev_end == date(2026, 4, 14)
+
+    def test_arbitrary_length(self):
+        prev_start, prev_end = weekly_summary.previous_period(
+            date(2026, 4, 10), date(2026, 4, 20)  # 11-day window
+        )
+        assert prev_end == date(2026, 4, 9)
+        assert prev_start == date(2026, 3, 30)
+        assert (prev_end - prev_start).days == 10
+
+
+# ---------------------------------------------------------------------------
+# compute_diff
+# ---------------------------------------------------------------------------
+
+def _stats(
+    *,
+    total: int = 0,
+    days: int = 0,
+    by_category: dict | None = None,
+    finance_total: float = 0.0,
+    finance_subs: dict | None = None,
+    moods: dict | None = None,
+) -> dict:
+    """Build a stats dict the way compute_stats would."""
+    return {
+        "total_entries": total,
+        "days_with_entries": days,
+        "first_date": None,
+        "last_date": None,
+        "by_category": by_category or {},
+        "finance": {
+            "total": finance_total,
+            "by_subcategory": finance_subs or {},
+            "top_expenses": [],
+        },
+        "habits": {"by_subcategory": {}, "streaks": {}},
+        "moods": moods or {},
+    }
+
+
+class TestComputeDiff:
+    def test_entry_counts(self):
+        diff = weekly_summary.compute_diff(_stats(total=31), _stats(total=2))
+        assert diff["entries"]["curr"] == 31
+        assert diff["entries"]["prev"] == 2
+        assert diff["entries"]["delta"] == 29
+
+    def test_active_days(self):
+        diff = weekly_summary.compute_diff(_stats(days=5), _stats(days=1))
+        assert diff["active_days"] == {"curr": 5, "prev": 1}
+
+    def test_finance_delta(self):
+        diff = weekly_summary.compute_diff(
+            _stats(finance_total=300.0), _stats(finance_total=200.0)
+        )
+        assert diff["finance"]["delta"] == 100.0
+        assert "+50%" in diff["finance"]["pct"]
+
+    def test_finance_zero_to_nonzero_marks_new(self):
+        diff = weekly_summary.compute_diff(
+            _stats(finance_total=300.0), _stats(finance_total=0.0)
+        )
+        assert diff["finance"]["pct"] == "new"
+
+    def test_finance_nonzero_to_zero_is_minus_100(self):
+        diff = weekly_summary.compute_diff(
+            _stats(finance_total=0.0), _stats(finance_total=300.0)
+        )
+        assert "100" in diff["finance"]["pct"]
+
+    def test_top_finance_shifts_sorted_by_abs_delta(self):
+        curr = _stats(finance_subs={"food": 100.0, "rent": 15000.0, "books": 200.0})
+        prev = _stats(finance_subs={"food": 200.0, "rent": 15000.0, "transport": 500.0})
+        # Deltas: food -100, rent 0 (skipped), books +200, transport -500
+        diff = weekly_summary.compute_diff(curr, prev)
+        # rent (delta 0) should be excluded; top 3 by |delta|: transport, books, food
+        shifts = diff["top_finance_shifts"]
+        assert len(shifts) == 3
+        names = [s[0] for s in shifts]
+        assert names == ["transport", "books", "food"]
+
+    def test_moods_appeared_and_disappeared(self):
+        curr = _stats(moods={"happy": 1, "anxious": 1})
+        prev = _stats(moods={"focused": 2, "happy": 3})
+        diff = weekly_summary.compute_diff(curr, prev)
+        assert diff["moods_appeared"] == ["anxious"]
+        assert diff["moods_disappeared"] == ["focused"]
+
+    def test_no_moods_either_side(self):
+        diff = weekly_summary.compute_diff(_stats(), _stats())
+        assert diff["moods_appeared"] == []
+        assert diff["moods_disappeared"] == []
+
+
+# ---------------------------------------------------------------------------
+# render_diff_section
+# ---------------------------------------------------------------------------
+
+class TestRenderDiffSection:
+    def test_includes_header_and_entries(self):
+        diff = weekly_summary.compute_diff(_stats(total=10, days=3), _stats(total=5, days=2))
+        out = "\n".join(weekly_summary.render_diff_section(diff))
+        assert "## Compared to the previous week" in out
+        assert "Entries" in out and "5 → 10" in out
+        assert "Active days" in out
+
+    def test_omits_finance_when_no_money(self):
+        diff = weekly_summary.compute_diff(_stats(), _stats())
+        out = "\n".join(weekly_summary.render_diff_section(diff))
+        assert "Spending" not in out
+
+    def test_includes_finance_shifts(self):
+        curr = _stats(finance_total=500.0, finance_subs={"food": 500.0})
+        prev = _stats(finance_total=200.0, finance_subs={"food": 200.0})
+        out = "\n".join(weekly_summary.render_diff_section(
+            weekly_summary.compute_diff(curr, prev)
+        ))
+        assert "Biggest finance shifts" in out
+        assert "food: ₹200 → ₹500" in out
+
+    def test_mood_lines_only_when_changed(self):
+        curr = _stats(moods={"happy": 1})
+        prev = _stats(moods={"happy": 2})
+        out = "\n".join(weekly_summary.render_diff_section(
+            weekly_summary.compute_diff(curr, prev)
+        ))
+        assert "New moods" not in out
+        assert "no longer present" not in out
+
+
+# ---------------------------------------------------------------------------
+# render_markdown integration with diff
+# ---------------------------------------------------------------------------
+
+class TestRenderMarkdownWithDiff:
+    def test_diff_section_appears_after_header(self):
+        entries = [_entry("2026-04-15", "WORK")]
+        diff = weekly_summary.compute_diff(_stats(total=1, days=1), _stats(total=0))
+        out = weekly_summary.render_markdown(
+            entries, date(2026, 4, 13), date(2026, 4, 19), diff=diff,
+        )
+        # The diff section should sit between the activity-rate line and the
+        # ## Activity heading.
+        rate_idx = out.find("active)")
+        diff_idx = out.find("## Compared to the previous week")
+        activity_idx = out.find("## Activity")
+        assert -1 < rate_idx < diff_idx < activity_idx
+
+    def test_diff_section_renders_for_empty_week(self):
+        diff = weekly_summary.compute_diff(_stats(), _stats(total=10, days=4))
+        out = weekly_summary.render_markdown(
+            [], date(2026, 4, 13), date(2026, 4, 19), diff=diff,
+        )
+        assert "No journal entries this week" in out
+        assert "## Compared to the previous week" in out
+        assert "10 → 0" in out
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -249,6 +426,42 @@ class TestCli:
                 "--from", "2026-04-20",
                 "--to", "2026-04-10",
             ])
+
+    def test_compare_prev_emits_diff_section(self, journal_dir: Path, capsys: pytest.CaptureFixture):
+        # Add a previous-week file so the diff has something to compare to.
+        (journal_dir / "2026-04-08.md").write_text(
+            "# 2026-04-08 Journal\n\n## [WORK]\n"
+            "- [10:00 AM] [WORK/coding] Earlier work\n\n"
+            "## [PERSONAL]\n\n## [HABITS]\n\n"
+            "## [FINANCE]\n- [9:00 AM] [FINANCE/food] Coffee ₹50\n"
+        )
+        rc = weekly_summary.main([
+            "--data-dir", str(journal_dir.parent),
+            "--from", "2026-04-13",
+            "--to", "2026-04-19",
+            "--compare-prev",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "## Compared to the previous week" in out
+        # Current window (Apr 13 + Apr 15 fixture) has 5 entries, previous window
+        # (Apr 8 only) has 2 entries.
+        assert "2 → 5" in out
+        assert "Spending" in out
+        assert "food: ₹50 → ₹230" in out
+
+    def test_compare_prev_with_empty_prev_window(self, journal_dir: Path, capsys: pytest.CaptureFixture):
+        rc = weekly_summary.main([
+            "--data-dir", str(journal_dir.parent),
+            "--from", "2026-04-13",
+            "--to", "2026-04-19",
+            "--compare-prev",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "## Compared to the previous week" in out
+        # Previous window had 0 entries; pct should read "new"
+        assert "new" in out
 
 
 if __name__ == "__main__":

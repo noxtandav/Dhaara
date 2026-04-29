@@ -348,11 +348,14 @@ python scripts/weekly_summary.py
 # Specific ISO week (Mon-Sun)
 python scripts/weekly_summary.py --week 2026-W17
 
+# Add week-over-week deltas (entries, spending, mood drift, top finance shifts)
+python scripts/weekly_summary.py --week 2026-W17 --compare-prev
+
 # Save next to your daily files
 python scripts/weekly_summary.py --week 2026-W17 -o ~/PAI/DhaaraData/weekly/2026-W17.md
 ```
 
-Output is plain Markdown — paste it into your journal repo, share it with a friend, or schedule it as a Sunday-night cron.
+Output is plain Markdown — paste it into your journal repo, share it with a friend, or schedule it as a Sunday-night cron. With `--compare-prev`, you also get a "Compared to the previous week" section with concrete numbers like `Entries: 18 → 31 (+13, +72%)` and `food: ₹200 → ₹500 (+₹300)`.
 
 ---
 
