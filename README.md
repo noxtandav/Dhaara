@@ -317,6 +317,23 @@ python scripts/stats.py --category HABITS
 
 Currency parsing is best-effort — it understands `₹`, `Rs`, `$`, and bare numbers in FINANCE entries, plus `k`, `lakh`/`lac`, and `cr`/`crore` multipliers.
 
+### Weekly summary
+
+For a shareable markdown digest of a single week — entry counts, finance highlights, habit streaks, mood distribution, and the entries that carried a mood — there's `scripts/weekly_summary.py`:
+
+```bash
+# Last 7 days
+python scripts/weekly_summary.py
+
+# Specific ISO week (Mon-Sun)
+python scripts/weekly_summary.py --week 2026-W17
+
+# Save next to your daily files
+python scripts/weekly_summary.py --week 2026-W17 -o ~/PAI/DhaaraData/weekly/2026-W17.md
+```
+
+Output is plain Markdown — paste it into your journal repo, share it with a friend, or schedule it as a Sunday-night cron.
+
 ---
 
 ## Roadmap
