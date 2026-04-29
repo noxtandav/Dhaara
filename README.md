@@ -115,7 +115,15 @@ bedrock:
   aws_profile: "default"
 ```
 
-### 3. Run
+### 3. Verify your config (optional but recommended)
+
+```bash
+python scripts/check_config.py
+```
+
+A static linter that catches the things that bite first-time users — leftover placeholders from `config.example.yaml`, missing keys for the chosen AI provider, invalid timezones, oddly-shaped credentials. Exits non-zero on errors so you can wire it into a pre-deploy step. Add `-f json` for machine-readable output.
+
+### 4. Run
 
 ```bash
 # Foreground (for testing)
