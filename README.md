@@ -273,6 +273,25 @@ Everything else is an entry or a conversation.
 
 ---
 
+## Exporting your data
+
+Every entry already lives as plain markdown, so `grep` works. But if you want a structured view for spreadsheets or pandas, there's a standalone exporter:
+
+```bash
+# All entries to CSV (stdout)
+python scripts/export_journal.py
+
+# Last 30 days, finance only, to a file
+python scripts/export_journal.py --since 30d --category FINANCE -o finance.csv
+
+# JSON for a specific date range
+python scripts/export_journal.py --from 2026-04-01 --to 2026-04-30 -f json
+```
+
+It parses every `[time]`, `[CATEGORY/subcategory]`, mood, and text into one row per bullet — no extra dependencies beyond the standard library (PyYAML is used only if you let it auto-discover `data_dir` from `config.yaml`).
+
+---
+
 ## Roadmap
 
 - **Phase 1** ✅ — Journaling, voice, multilingual, expense extraction, category classification, edit/delete by line number
