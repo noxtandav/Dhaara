@@ -317,6 +317,26 @@ python scripts/stats.py --category HABITS
 
 Currency parsing is best-effort — it understands `₹`, `Rs`, `$`, and bare numbers in FINANCE entries, plus `k`, `lakh`/`lac`, and `cr`/`crore` multipliers.
 
+### Search
+
+Plain markdown is `grep`-able already, but `scripts/search.py` understands the entry structure — filter by category, mood, date range, regex, and case-sensitivity in one go:
+
+```bash
+# Substring search across the last 30 days
+python scripts/search.py dhaara --since 30d
+
+# All "anxious" moments in April
+python scripts/search.py --mood anxious --from 2026-04-01 --to 2026-04-30
+
+# Case-sensitive regex over WORK entries only
+python scripts/search.py "API\b" --regex --match-case --category WORK
+
+# JSON for piping
+python scripts/search.py "claude" -f json
+```
+
+Matches are highlighted in bold red on a TTY (use `--color always|never` to override). Exit code is 0 on hits, 1 on no matches — handy for shell scripting.
+
 ### Weekly summary
 
 For a shareable markdown digest of a single week — entry counts, finance highlights, habit streaks, mood distribution, and the entries that carried a mood — there's `scripts/weekly_summary.py`:
