@@ -403,6 +403,7 @@ Eleven standalone CLI scripts ship in `scripts/` for setup, daily nudges, reflec
 
 **Exploration & export**
 - [`search.py`](#search) — structured search with category/mood/date filters and surrounding context
+- [`tags.py`](#tag-inventory) — inventory the subcategories and moods you've used (counts + last-seen dates)
 - [`export_journal.py`](#export-and-pivots) — CSV/JSON export with optional pivot aggregation
 
 All scripts share the same flag conventions where applicable: `--data-dir`, `--from / --to / --since 7d|4w|6m`, `--category`, `-f text|markdown|json`, `-o file|-`. Each has `--help`.
@@ -572,6 +573,23 @@ python scripts/search.py Hitachi --context 2
 Matches are highlighted in bold red on a TTY (use `--color always|never` to override). Exit code is 0 on hits, 1 on no matches — handy for shell scripting.
 
 With `--context N` (or `-C N`), each match shows the N entries before and after it in chronological order. Adjacent windows merge automatically; non-adjacent blocks are separated by `--`. Actual matches are marked with `▸ ` so you can spot them within the context. JSON output shifts to a list-of-blocks shape with an `is_match` flag per entry.
+
+### Tag inventory
+
+The agent invents subcategory names as you go (`coding`, `food`, `subscriptions`, `family`...). Over time you build up a personal classification system without ever planning one. `scripts/tags.py` surfaces what's there:
+
+```bash
+# Whole-journal inventory
+python scripts/tags.py
+
+# Just the last 90 days — what's my recent taxonomy?
+python scripts/tags.py --since 90d
+
+# JSON for piping
+python scripts/tags.py -f json
+```
+
+Each subcategory shows count + last-seen date, sorted by count descending. Useful for spotting subcategories you've used once and never again, subcategories that have exploded and might want splitting, or moods you've stopped tagging. Same parser as the rest of the toolset — works against your existing journal with no setup.
 
 ### Weekly summary
 
