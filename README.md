@@ -317,6 +317,23 @@ python scripts/stats.py --category HABITS
 
 Currency parsing is best-effort — it understands `₹`, `Rs`, `$`, and bare numbers in FINANCE entries, plus `k`, `lakh`/`lac`, and `cr`/`crore` multipliers.
 
+### Today
+
+The "what have I journaled this morning?" glance — a focused, single-day breakdown:
+
+```bash
+# What's in today's file?
+python scripts/today.py
+
+# Yesterday's recap
+python scripts/today.py --date 2026-04-29
+
+# Markdown for a daily review note
+python scripts/today.py -f markdown
+```
+
+You get one section per category in WORK / PERSONAL / HABITS / FINANCE order, entries sorted by time, finance subtotal in the section header, and a "Moods today" line at the bottom. Empty days render a clean "Nothing recorded yet" message.
+
 ### Streak nudge
 
 A glanceable one-liner showing your current streak — designed to live in your shell prompt or status bar:
