@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from export_journal import (  # noqa: E402
     Entry,
+    collect_entries,
     parse_day_file,
     resolve_data_dir,
 )
@@ -65,8 +66,52 @@ def _parse_time(time_str: str) -> int:
     return 0  # unparseable times sort first
 
 
-def build_report(entries: list[Entry], target: date) -> dict:
-    """Group entries by category and compute the per-section subtotals."""
+def find_last_entry_on_or_before(data_dir: Path, target: date) -> Entry | None:
+    """Most recent entry whose date <= `target`. None if none.
+
+    Used for the "last entry was N days ago" hint we surface when the
+    target day itself has no entries — turns the empty-day report from
+    a dead end into a nudge.
+    """
+    journal_dir = data_dir / "journal"
+    if not journal_dir.is_dir():
+        return None
+    try:
+        all_entries = collect_entries(journal_dir, None, target, None)
+    except SystemExit:
+        return None
+    if not all_entries:
+        return None
+    # collect_entries returns entries in date order but doesn't sort by
+    # time within a day; pin the ordering with (date, parsed_time).
+    all_entries.sort(key=lambda e: (e.date, _parse_time(e.time)))
+    return all_entries[-1]
+
+
+def _format_gap(target: date, entry_date: str) -> str:
+    """Return 'today' / 'yesterday' / 'N days ago' for the gap from
+    `entry_date` to `target`."""
+    delta = (target - date.fromisoformat(entry_date)).days
+    if delta <= 0:
+        return "today"
+    if delta == 1:
+        return "yesterday"
+    return f"{delta} days ago"
+
+
+def build_report(
+    entries: list[Entry],
+    target: date,
+    *,
+    last_entry: Entry | None = None,
+) -> dict:
+    """Group entries by category and compute the per-section subtotals.
+
+    `last_entry` is only consulted when the target day itself has no
+    entries — in that case it powers the "last entry was N days ago"
+    nudge in the empty-day message. When None or when target has its
+    own entries, the report ignores it.
+    """
     # Keep the canonical 4-section ordering, but only surface sections
     # that actually have entries for the day.
     by_category: "OrderedDict[str, list[Entry]]" = OrderedDict()
@@ -91,6 +136,16 @@ def build_report(entries: list[Entry], target: date) -> dict:
         if e.mood and e.mood not in moods:
             moods.append(e.mood)
 
+    last_info: dict | None = None
+    if not entries and last_entry is not None:
+        last_info = {
+            "date": last_entry.date,
+            "time": last_entry.time,
+            "category": last_entry.category,
+            "subcategory": last_entry.subcategory,
+            "gap": _format_gap(target, last_entry.date),
+        }
+
     return {
         "date": target.isoformat(),
         "dow": target.strftime("%A"),
@@ -98,6 +153,7 @@ def build_report(entries: list[Entry], target: date) -> dict:
         "by_category": {cat: [asdict(e) for e in rows] for cat, rows in by_category.items()},
         "finance_total": round(finance_total, 2),
         "moods": moods,
+        "last_entry": last_info,
     }
 
 
@@ -112,7 +168,13 @@ def _format_entry_line(entry: Entry) -> str:
 
 def render_text(report: dict, entries: list[Entry]) -> str:
     if report["total_entries"] == 0:
-        return f"📓 {report['date']} ({report['dow']}) — Nothing recorded yet.\n"
+        head = f"📓 {report['date']} ({report['dow']}) — Nothing recorded yet."
+        last = report.get("last_entry")
+        if last:
+            head += f" Last entry: {last['gap']} ({last['date']} {last['time']})."
+        else:
+            head += " No journal entries yet anywhere."
+        return head + "\n"
 
     lines: list[str] = []
     n = report["total_entries"]
@@ -155,6 +217,14 @@ def render_markdown(report: dict, entries: list[Entry]) -> str:
 
     if report["total_entries"] == 0:
         lines.append("_Nothing recorded yet._")
+        last = report.get("last_entry")
+        if last:
+            lines.append(
+                f"_Last entry: {last['gap']} "
+                f"(`{last['date']}` at {last['time']})._"
+            )
+        else:
+            lines.append("_No journal entries yet anywhere._")
         lines.append("")
         return "\n".join(lines)
 
@@ -217,7 +287,13 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
 
-    report = build_report(entries, target)
+    # Only do the wider scan when we'd actually use the result — keeps the
+    # active-day path as fast as it was in iteration 12.
+    last_entry = (
+        find_last_entry_on_or_before(data_dir, target) if not entries else None
+    )
+
+    report = build_report(entries, target, last_entry=last_entry)
 
     if args.format == "json":
         sys.stdout.write(render_json(report))

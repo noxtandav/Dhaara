@@ -377,7 +377,9 @@ python scripts/today.py --date 2026-04-29
 python scripts/today.py -f markdown
 ```
 
-You get one section per category in WORK / PERSONAL / HABITS / FINANCE order, entries sorted by time, finance subtotal in the section header, and a "Moods today" line at the bottom. Empty days render a clean "Nothing recorded yet" message.
+You get one section per category in WORK / PERSONAL / HABITS / FINANCE order, entries sorted by time, finance subtotal in the section header, and a "Moods today" line at the bottom.
+
+Empty days render a "Nothing recorded yet" message that also surfaces the gap since your previous entry — `Last entry: 13 days ago (2026-04-17 12:04 PM)` — so the report turns into a nudge instead of a dead end. If there are no entries anywhere yet, it says so explicitly.
 
 ### Streak nudge
 

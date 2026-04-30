@@ -272,5 +272,222 @@ class TestCli:
             ])
 
 
+# ---------------------------------------------------------------------------
+# find_last_entry_on_or_before
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def data_dir_with_entries(tmp_path: Path) -> Path:
+    j = tmp_path / "journal"
+    j.mkdir()
+    (j / "2026-04-13.md").write_text(
+        "# 2026-04-13 Journal\n\n## [WORK]\n"
+        "- [10:00 AM] [WORK/coding] morning work\n"
+        "- [4:30 PM] [WORK/meetings] afternoon meeting\n\n"
+        "## [PERSONAL]\n## [HABITS]\n## [FINANCE]\n"
+    )
+    (j / "2026-04-15.md").write_text(
+        "# 2026-04-15 Journal\n\n## [WORK]\n\n"
+        "## [PERSONAL]\n- [9:30 PM] [PERSONAL/family] evening note\n\n"
+        "## [HABITS]\n## [FINANCE]\n"
+    )
+    return tmp_path
+
+
+class TestFindLastEntry:
+    def test_returns_most_recent_overall(self, data_dir_with_entries: Path):
+        last = today.find_last_entry_on_or_before(
+            data_dir_with_entries, date(2026, 4, 30)
+        )
+        assert last is not None
+        assert last.date == "2026-04-15"
+        assert last.time == "9:30 PM"
+
+    def test_picks_latest_time_within_a_day(self, data_dir_with_entries: Path):
+        # Limit to 2026-04-13 — should return the 4:30 PM entry, not the 10 AM one.
+        last = today.find_last_entry_on_or_before(
+            data_dir_with_entries, date(2026, 4, 13)
+        )
+        assert last is not None
+        assert last.date == "2026-04-13"
+        assert last.time == "4:30 PM"
+
+    def test_returns_none_when_no_entries(self, tmp_path: Path):
+        (tmp_path / "journal").mkdir()
+        assert today.find_last_entry_on_or_before(tmp_path, date(2026, 4, 30)) is None
+
+    def test_returns_none_when_journal_dir_missing(self, tmp_path: Path):
+        assert today.find_last_entry_on_or_before(tmp_path, date(2026, 4, 30)) is None
+
+    def test_excludes_entries_after_target(self, data_dir_with_entries: Path):
+        # Target before 2026-04-15 — should not find the Apr 15 entry.
+        last = today.find_last_entry_on_or_before(
+            data_dir_with_entries, date(2026, 4, 14)
+        )
+        assert last is not None
+        assert last.date == "2026-04-13"
+
+
+# ---------------------------------------------------------------------------
+# _format_gap
+# ---------------------------------------------------------------------------
+
+class TestFormatGap:
+    def test_same_day(self):
+        assert today._format_gap(date(2026, 4, 30), "2026-04-30") == "today"
+
+    def test_yesterday(self):
+        assert today._format_gap(date(2026, 4, 30), "2026-04-29") == "yesterday"
+
+    def test_n_days(self):
+        assert today._format_gap(date(2026, 4, 30), "2026-04-15") == "15 days ago"
+
+    def test_zero_for_future_date(self):
+        # Defensive: if last_entry is somehow after target, don't say "-1 days ago"
+        assert today._format_gap(date(2026, 4, 15), "2026-04-30") == "today"
+
+
+# ---------------------------------------------------------------------------
+# build_report.last_entry
+# ---------------------------------------------------------------------------
+
+class TestBuildReportLastEntry:
+    def test_no_last_entry_when_target_has_entries(self):
+        # Even if last_entry is provided, it should not appear when target has entries.
+        from export_journal import Entry
+        last = Entry(
+            date="2026-04-10", time="9:00 AM", category="WORK",
+            subcategory="x", text="prior", mood="",
+        )
+        report = today.build_report(
+            [_entry("9:00 AM", "WORK", text="now")],
+            date(2026, 4, 15), last_entry=last,
+        )
+        assert report["last_entry"] is None
+
+    def test_no_last_entry_when_none_passed(self):
+        report = today.build_report([], date(2026, 4, 30))
+        assert report["last_entry"] is None
+
+    def test_last_entry_populated_when_empty_target(self):
+        from export_journal import Entry
+        last = Entry(
+            date="2026-04-17", time="12:04 PM", category="FINANCE",
+            subcategory="maintenance", text="x", mood="",
+        )
+        report = today.build_report([], date(2026, 4, 30), last_entry=last)
+        assert report["last_entry"] == {
+            "date": "2026-04-17",
+            "time": "12:04 PM",
+            "category": "FINANCE",
+            "subcategory": "maintenance",
+            "gap": "13 days ago",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Renderers — empty path with last_entry
+# ---------------------------------------------------------------------------
+
+class TestEmptyDayRenderingWithLastEntry:
+    def _empty_report(self, target: date, last_entry: dict | None) -> dict:
+        return {
+            "date": target.isoformat(),
+            "dow": target.strftime("%A"),
+            "total_entries": 0,
+            "by_category": {},
+            "finance_total": 0.0,
+            "moods": [],
+            "last_entry": last_entry,
+        }
+
+    def test_text_no_prior_entries_message(self):
+        out = today.render_text(self._empty_report(date(2026, 4, 30), None), [])
+        assert "Nothing recorded yet" in out
+        assert "No journal entries yet anywhere" in out
+
+    def test_text_includes_gap_when_last_known(self):
+        last = {
+            "date": "2026-04-17", "time": "12:04 PM",
+            "category": "FINANCE", "subcategory": "x",
+            "gap": "13 days ago",
+        }
+        out = today.render_text(self._empty_report(date(2026, 4, 30), last), [])
+        assert "Nothing recorded yet" in out
+        assert "Last entry: 13 days ago" in out
+        assert "2026-04-17" in out
+        assert "12:04 PM" in out
+
+    def test_markdown_no_prior_entries(self):
+        out = today.render_markdown(self._empty_report(date(2026, 4, 30), None), [])
+        assert "_Nothing recorded yet._" in out
+        assert "No journal entries yet anywhere" in out
+
+    def test_markdown_includes_gap_line(self):
+        last = {
+            "date": "2026-04-17", "time": "12:04 PM",
+            "category": "FINANCE", "subcategory": "x",
+            "gap": "13 days ago",
+        }
+        out = today.render_markdown(self._empty_report(date(2026, 4, 30), last), [])
+        assert "_Nothing recorded yet._" in out
+        assert "_Last entry: 13 days ago" in out
+        assert "`2026-04-17`" in out
+
+
+# ---------------------------------------------------------------------------
+# CLI — empty-day nudge integration
+# ---------------------------------------------------------------------------
+
+class TestCliEmptyDayNudge:
+    def test_empty_day_with_prior_history(self, data_dir_with_entries: Path,
+                                          capsys: pytest.CaptureFixture):
+        rc = today.main([
+            "--data-dir", str(data_dir_with_entries),
+            "--date", "2026-04-30",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Nothing recorded yet" in out
+        assert "Last entry: 15 days ago" in out
+        assert "2026-04-15" in out
+
+    def test_empty_day_with_no_prior_history(self, tmp_path: Path,
+                                             capsys: pytest.CaptureFixture):
+        (tmp_path / "journal").mkdir()
+        rc = today.main([
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Nothing recorded yet" in out
+        assert "No journal entries yet anywhere" in out
+
+    def test_active_day_unchanged(self, data_dir_with_entries: Path,
+                                  capsys: pytest.CaptureFixture):
+        rc = today.main([
+            "--data-dir", str(data_dir_with_entries),
+            "--date", "2026-04-13",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        # Active day should NOT include the "Last entry: X days ago" hint
+        # (the entry times in the body already convey the same info).
+        assert "Last entry:" not in out
+
+    def test_json_includes_last_entry_struct(self, data_dir_with_entries: Path,
+                                             capsys: pytest.CaptureFixture):
+        rc = today.main([
+            "--data-dir", str(data_dir_with_entries),
+            "--date", "2026-04-30",
+            "-f", "json",
+        ])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["last_entry"]["date"] == "2026-04-15"
+        assert payload["last_entry"]["gap"] == "15 days ago"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
