@@ -23,6 +23,7 @@ Most journaling apps ask you to sit down, open a page, and write. Most of us don
 - 🗂️ **Your data, your disk.** Plain markdown files. No cloud lock-in. No database. `grep` just works.
 - 🔓 **BYO-model.** Runs on **AWS Bedrock** *or* **OpenRouter** — pick Claude, Nova, Mistral, Gemini, Llama, whatever you like.
 - 👤 **Single-user by design.** The bot answers to exactly one Telegram ID — yours.
+- 📊 **Analytics out of the box.** Streak nudges, activity heatmaps, mood timelines, weekly summaries, search with context, and a combined dashboard — all reading the same plain markdown. See [§ Tools](#tools).
 
 ---
 
@@ -137,18 +138,76 @@ Idempotent — re-running tells you what was already there and never overwrites 
 ```bash
 # Foreground (for testing)
 python -m src.main
-
-# Production: keep it alive with PM2
-npm install -g pm2
-cp ecosystem.config.js.example ecosystem.config.js
-# (edit dataDir in ecosystem.config.js to match your config.yaml's data_dir)
-pm2 start ecosystem.config.js
-pm2 save && pm2 startup
 ```
 
-The PM2 manifest registers four apps: the always-on bot itself, plus three scheduled jobs that fire automatically — `dhaara-weekly` (Sunday-night markdown weekly review), `dhaara-dashboard` (nightly rolling 7-day digest), and `dhaara-streak` (evening desktop nudge if your streak breaks). Comment out or `pm2 stop <name>` any you don't want.
+Message your bot — that's it. For production deployment with PM2 and the auto-scheduled review jobs, see [§ Running with PM2](#running-with-pm2) below.
 
-Message your bot. That's it.
+---
+
+## Running with PM2
+
+For long-running deployments, dhaara ships with a [PM2](https://pm2.keymetrics.io/) manifest that registers **four apps in one go**: the always-on bot plus three scheduled review jobs.
+
+| App | What it does | Schedule |
+|---|---|---|
+| `dhaara` | The Telegram bot | Always on, auto-restarts on failure |
+| `dhaara-weekly` | Markdown weekly review → `<data_dir>/weekly/YYYY-Www.md` | Sundays 21:07 local |
+| `dhaara-dashboard` | Rolling 7-day combined dashboard → `<data_dir>/dashboards/YYYY-MM-DD.md` | Daily 23:53 local |
+| `dhaara-streak` | Desktop notification if your streak broke (macOS `osascript`) | Daily 19:37 local |
+
+Schedules use off-the-round minutes (`:07`, `:53`, `:37`) to dodge the fleet-wide thundering herd of `0 21` / `0 0` / `0 19`.
+
+### One-time setup
+
+```bash
+npm install -g pm2
+cp ecosystem.config.js.example ecosystem.config.js
+```
+
+Open `ecosystem.config.js` and edit the two paths near the top:
+
+- `dataDir` — should match your `config.yaml`'s `data_dir`
+- `logsDir` — where PM2 writes process logs (default `./logs`, gitignored)
+
+### Start and persist
+
+```bash
+pm2 start ecosystem.config.js   # registers all four apps
+pm2 save                         # snapshot the process list
+pm2 startup                      # prints a sudo line — run it once for boot survival
+```
+
+After `pm2 startup`, dhaara survives reboots. Any future `pm2 stop` / `pm2 delete` requires another `pm2 save` to persist.
+
+### Operating it
+
+```bash
+pm2 list                            # what's registered, what's running
+pm2 logs dhaara                     # tail the bot's output
+pm2 logs dhaara-weekly --lines 50   # tail any specific app
+pm2 restart dhaara                  # bounce the bot after a code change
+pm2 trigger dhaara-dashboard        # force a scheduled job to fire NOW (testing)
+pm2 stop dhaara-streak              # disable an app — then `pm2 save`
+pm2 delete dhaara-weekly            # unregister entirely — then `pm2 save`
+```
+
+### Caveats and troubleshooting
+
+- **`stopped` is the normal state for cron apps between fires.** They wake up on schedule, run once, and go back to sleep. Only `dhaara` should show `online` 24/7.
+- **PM2 uses local OS time.** Match the timezone in your `config.yaml`. If the OS is UTC and the config says `Asia/Kolkata`, schedules above fire 5h30m later than you expect.
+- **`autorestart: false` is mandatory for cron jobs.** Without it, PM2 immediately re-runs the script on exit and "every Sunday 21:07" becomes "as fast as Python can finish." The shipped manifest already sets this correctly.
+- **Bot silent on Telegram?** `pm2 logs dhaara` — common causes: typo in token, two machines polling the same bot (`409 Conflict: terminated by other getUpdates request`), or model rate-limiting.
+- **macOS notifications not appearing?** Confirm `osascript` (Script Editor) is allowed to send notifications under *System Settings → Notifications*.
+
+### Linux users
+
+The streak nudge uses macOS-only `osascript`. In `ecosystem.config.js`, swap the `osascript` line for:
+
+```js
+'notify-send "Dhaara" "$MSG"'
+```
+
+(requires `libnotify`). Or drop the app entirely with `pm2 delete dhaara-streak && pm2 save`.
 
 ---
 
@@ -295,7 +354,32 @@ Everything else is an entry or a conversation.
 
 ---
 
-## Exporting your data
+## Tools
+
+Eleven standalone CLI scripts ship in `scripts/` for setup, daily nudges, reflection, exploration, and export. They all read the same plain-markdown journal — no separate database, no schema migrations. Pure stdlib at runtime (PyYAML is optional, only needed for `data_dir` auto-discovery from `config.yaml`).
+
+**Setup** ([§ Quick start](#quick-start) walks you through these on first run)
+- `init.py` — create `data_dir/`, `journal/`, `_telos/` + seed example TELOS files
+- `check_config.py` — lint `config.yaml` (placeholders, missing keys, invalid timezones)
+
+**Daily nudges**
+- [`today.py`](#today) — single-day breakdown with finance subtotal and last-entry hint
+- [`streak.py`](#streak-nudge) — current streak, designed to live in your shell prompt
+
+**Reflection**
+- [`weekly_summary.py`](#weekly-summary) — markdown weekly digest with week-over-week deltas
+- [`dashboard.py`](#combined-dashboard) — combined "everything in one document" digest
+- [`activity_heatmap.py`](#activity-calendar) — GitHub-contribution-style calendar
+- [`mood_timeline.py`](#mood-timeline) — per-day mood heatmap
+- [`stats.py`](#quick-stats) — period stats roll-up
+
+**Exploration & export**
+- [`search.py`](#search) — structured search with category/mood/date filters and surrounding context
+- [`export_journal.py`](#export-and-pivots) — CSV/JSON export with optional pivot aggregation
+
+All scripts share the same flag conventions where applicable: `--data-dir`, `--from / --to / --since 7d|4w|6m`, `--category`, `-f text|markdown|json`, `-o file|-`. Each has `--help`.
+
+### Export and pivots
 
 Every entry already lives as plain markdown, so `grep` works. But if you want a structured view for spreadsheets or pandas, there's a standalone exporter:
 
@@ -486,8 +570,9 @@ Output is plain Markdown — paste it into your journal repo, share it with a fr
 ## Roadmap
 
 - **Phase 1** ✅ — Journaling, voice, multilingual, expense extraction, category classification, edit/delete by line number
-- **Phase 2** 🚧 — RAG retrieval ("what did I write about dhaara last month?"), entry editing, daily/weekly summaries
-- **Phase 3** 🔭 — Mood trends, habit dashboards, growth analysis, cross-agent workflows in the wider PAI ecosystem
+- **Phase 2** ✅ — Lexical search with date/category/mood filters and `±N` context (`scripts/search.py`); daily and weekly markdown summaries (`today.py`, `weekly_summary.py`); CSV/JSON export with pivot aggregation (`export_journal.py`)
+- **Phase 3** ✅ (mostly) — Mood timelines (`mood_timeline.py`), habit dashboards (`activity_heatmap.py`, `dashboard.py`), growth analysis (`stats.py`, week-over-week deltas)
+- **Phase 4** 🚧 — Vector / RAG retrieval ("what did I write *semantically about* career anxiety last quarter?"); cross-agent workflows in the wider PAI ecosystem
 
 ---
 
@@ -495,10 +580,11 @@ Output is plain Markdown — paste it into your journal repo, share it with a fr
 
 Contributions are very welcome. Open an issue first for anything non-trivial so we can align on direction. Good first areas:
 
-- Adding new AI providers (Anthropic direct, Gemini direct, local Ollama)
-- Phase 2 features: RAG retrieval over past entries, daily / weekly summaries
-- Better expense parsing across currencies
-- More tests (see below)
+- New AI providers (Anthropic direct, Gemini direct, local Ollama via `src/ai/provider.py`)
+- Phase 4 features: vector retrieval over past entries (the lexical foundation in `search.py` is ready to layer over)
+- Better expense parsing across currencies (the `extract_amount` regex in `scripts/stats.py` is the obvious starting point — currently handles `₹`, `Rs`, `$`, plus `k` / `lakh` / `lac` / `cr` / `crore` multipliers)
+- More tests for the agent loop (`src/ai/graph.py`) — the helper modules are well-covered but the LangGraph state machine is not directly exercised yet
+- Linux notification path for `dhaara-streak` (currently macOS-only via `osascript`)
 
 ### Running tests
 
@@ -507,7 +593,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite lives in `tests/` and covers the journal formatter, the export script, and the stats roll-up. Pure unit tests, no fixtures or network — 80+ tests in under a second. CI runs them on every push and PR against Python 3.11, 3.12, and 3.13 (see `.github/workflows/test.yml`).
+The suite covers the journal formatter and all eleven CLI scripts — 437 unit tests in ~0.25s. Pure stdlib fixtures, no network. CI runs them on every push and PR against Python 3.11, 3.12, and 3.13 (see `.github/workflows/test.yml`).
 
 ---
 
