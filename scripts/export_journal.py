@@ -18,6 +18,12 @@ Examples
   # JSON, all of April 2026
   python scripts/export_journal.py --from 2026-04-01 --to 2026-04-30 -f json
 
+  # Pivot: count + spending sum + first/last date per finance subcategory
+  python scripts/export_journal.py --category FINANCE --group-by subcategory
+
+  # Cross-tab: per category x subcategory
+  python scripts/export_journal.py --group-by category,subcategory
+
   # Use a custom data dir (otherwise read from config.yaml, then fall back
   # to ~/PAI/DhaaraData)
   python scripts/export_journal.py --data-dir ~/some/other/dir
@@ -188,6 +194,88 @@ def write_json(entries: list[Entry], stream) -> None:
     stream.write("\n")
 
 
+# ---------------------------------------------------------------------------
+# Pivot / group-by
+# ---------------------------------------------------------------------------
+
+VALID_GROUP_KEYS = ("category", "subcategory", "mood", "date")
+
+
+def aggregate(entries: list[Entry], group_keys: list[str]) -> list[dict]:
+    """Roll entries up by `group_keys` into pivot rows.
+
+    Each row carries the grouping columns plus:
+      - count: number of entries in the group
+      - sum_amount: ₹ total of FINANCE entries in the group (None if no
+        FINANCE rows or no parseable amounts)
+      - first_date / last_date: bookends of the group's activity
+
+    Sort: by sum_amount desc when any group has amounts, else by count
+    desc; alphabetical tiebreak on the first group key for stability.
+    """
+    # Deferred import — stats.py imports from this module, so a top-level
+    # import here would create a cycle. extract_amount is a pure function,
+    # so deferring is safe (and free at module-load time).
+    from stats import extract_amount  # type: ignore  # noqa: WPS433
+
+    if not group_keys:
+        raise ValueError("aggregate() requires at least one group key")
+    for key in group_keys:
+        if key not in VALID_GROUP_KEYS:
+            raise ValueError(
+                f"unknown group key {key!r}; valid keys: {VALID_GROUP_KEYS}"
+            )
+
+    grouped: dict[tuple, list[Entry]] = {}
+    for e in entries:
+        key = tuple(getattr(e, k) for k in group_keys)
+        grouped.setdefault(key, []).append(e)
+
+    rows: list[dict] = []
+    any_amounts = False
+    for key, group in grouped.items():
+        amounts = [
+            amt for e in group
+            if e.category == "FINANCE"
+            for amt in [extract_amount(e.text)]
+            if amt is not None
+        ]
+        sum_amount = round(sum(amounts), 2) if amounts else None
+        if sum_amount is not None:
+            any_amounts = True
+        row = {k: v for k, v in zip(group_keys, key)}
+        row["count"] = len(group)
+        row["sum_amount"] = sum_amount
+        row["first_date"] = min(e.date for e in group)
+        row["last_date"] = max(e.date for e in group)
+        rows.append(row)
+
+    if any_amounts:
+        rows.sort(
+            key=lambda r: (
+                -(r["sum_amount"] or 0),
+                -r["count"],
+                str(r.get(group_keys[0], "")),
+            )
+        )
+    else:
+        rows.sort(key=lambda r: (-r["count"], str(r.get(group_keys[0], ""))))
+    return rows
+
+
+def write_pivot_csv(rows: list[dict], group_keys: list[str], stream) -> None:
+    writer = csv.writer(stream)
+    headers = list(group_keys) + ["count", "sum_amount", "first_date", "last_date"]
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([row.get(h, "") if row.get(h) is not None else "" for h in headers])
+
+
+def write_pivot_json(rows: list[dict], stream) -> None:
+    json.dump(rows, stream, indent=2, ensure_ascii=False)
+    stream.write("\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Export Dhaara journal entries to CSV or JSON.",
@@ -207,6 +295,15 @@ def main(argv: list[str] | None = None) -> int:
         "--category",
         help=f"Filter to one category (one of {sorted(VALID_CATEGORIES)}).",
     )
+    parser.add_argument(
+        "--group-by",
+        dest="group_by",
+        help=(
+            "Aggregate output into a pivot table. Comma-separated keys from "
+            f"{list(VALID_GROUP_KEYS)} (e.g. 'category,subcategory'). Each row "
+            "shows count, sum_amount (FINANCE only), first_date, last_date."
+        ),
+    )
     parser.add_argument("-f", "--format", choices=["csv", "json"], default="csv")
     parser.add_argument(
         "-o",
@@ -218,6 +315,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.category and args.category.upper() not in VALID_CATEGORIES:
         parser.error(f"--category must be one of {sorted(VALID_CATEGORIES)}")
+
+    group_keys: list[str] = []
+    if args.group_by:
+        group_keys = [k.strip() for k in args.group_by.split(",") if k.strip()]
+        unknown = [k for k in group_keys if k not in VALID_GROUP_KEYS]
+        if unknown:
+            parser.error(
+                f"--group-by got unknown key(s) {unknown}; "
+                f"valid keys: {list(VALID_GROUP_KEYS)}"
+            )
 
     start: date | None = None
     if args.from_:
@@ -236,14 +343,25 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"info: {len(entries)} entries from {journal_dir}", file=sys.stderr)
 
-    writer = write_csv if args.format == "csv" else write_json
+    if group_keys:
+        rows = aggregate(entries, group_keys)
+        if args.format == "csv":
+            writer_fn = lambda stream: write_pivot_csv(rows, group_keys, stream)  # noqa: E731
+        else:
+            writer_fn = lambda stream: write_pivot_json(rows, stream)  # noqa: E731
+    else:
+        if args.format == "csv":
+            writer_fn = lambda stream: write_csv(entries, stream)  # noqa: E731
+        else:
+            writer_fn = lambda stream: write_json(entries, stream)  # noqa: E731
+
     if args.output == "-":
-        writer(entries, sys.stdout)
+        writer_fn(sys.stdout)
     else:
         out_path = Path(args.output).expanduser()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w", encoding="utf-8", newline="") as fh:
-            writer(entries, fh)
+            writer_fn(fh)
         print(f"info: wrote {out_path}", file=sys.stderr)
 
     return 0

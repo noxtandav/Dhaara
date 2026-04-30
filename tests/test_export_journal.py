@@ -268,5 +268,213 @@ class TestMainCli:
             ])
 
 
+# ---------------------------------------------------------------------------
+# Pivot / group-by
+# ---------------------------------------------------------------------------
+
+def _entry(date: str, cat: str, sub: str = "", text: str = "x", mood: str = "") -> export_journal.Entry:
+    return export_journal.Entry(
+        date=date, time="9:00 AM", category=cat, subcategory=sub,
+        text=text, mood=mood,
+    )
+
+
+class TestAggregate:
+    def test_empty_entries(self):
+        assert export_journal.aggregate([], ["category"]) == []
+
+    def test_requires_at_least_one_key(self):
+        with pytest.raises(ValueError):
+            export_journal.aggregate([_entry("2026-04-15", "WORK")], [])
+
+    def test_rejects_unknown_key(self):
+        with pytest.raises(ValueError):
+            export_journal.aggregate([_entry("2026-04-15", "WORK")], ["bogus"])
+
+    def test_count_per_group(self):
+        entries = [
+            _entry("2026-04-15", "WORK"),
+            _entry("2026-04-15", "WORK"),
+            _entry("2026-04-16", "PERSONAL"),
+        ]
+        rows = export_journal.aggregate(entries, ["category"])
+        by_cat = {r["category"]: r["count"] for r in rows}
+        assert by_cat == {"WORK": 2, "PERSONAL": 1}
+
+    def test_finance_amount_summed(self):
+        entries = [
+            _entry("2026-04-15", "FINANCE", "food", "Lunch ₹150"),
+            _entry("2026-04-16", "FINANCE", "food", "Coffee ₹80"),
+            _entry("2026-04-17", "FINANCE", "transport", "Auto ₹100"),
+        ]
+        rows = export_journal.aggregate(entries, ["subcategory"])
+        by_sub = {r["subcategory"]: r["sum_amount"] for r in rows}
+        assert by_sub == {"food": 230.0, "transport": 100.0}
+
+    def test_non_finance_has_null_sum_amount(self):
+        rows = export_journal.aggregate(
+            [_entry("2026-04-15", "WORK", "coding", "Refactor")], ["category"]
+        )
+        assert rows[0]["sum_amount"] is None
+
+    def test_first_last_dates(self):
+        entries = [
+            _entry("2026-04-17", "WORK"),
+            _entry("2026-04-13", "WORK"),
+            _entry("2026-04-15", "WORK"),
+        ]
+        rows = export_journal.aggregate(entries, ["category"])
+        assert rows[0]["first_date"] == "2026-04-13"
+        assert rows[0]["last_date"] == "2026-04-17"
+
+    def test_multi_key_grouping(self):
+        entries = [
+            _entry("2026-04-15", "FINANCE", "food", "Lunch ₹150"),
+            _entry("2026-04-16", "HABITS", "food", "Dinner notes"),
+            _entry("2026-04-17", "FINANCE", "food", "Coffee ₹80"),
+        ]
+        rows = export_journal.aggregate(entries, ["category", "subcategory"])
+        # Three groups: (FINANCE, food) → 2 entries, ₹230; (HABITS, food) → 1; etc.
+        keyed = {(r["category"], r["subcategory"]): r for r in rows}
+        assert keyed[("FINANCE", "food")]["count"] == 2
+        assert keyed[("FINANCE", "food")]["sum_amount"] == 230.0
+        assert keyed[("HABITS", "food")]["count"] == 1
+        assert keyed[("HABITS", "food")]["sum_amount"] is None
+
+    def test_sort_by_amount_desc_when_amounts_present(self):
+        entries = [
+            _entry("2026-04-15", "FINANCE", "small", "Spent ₹50"),
+            _entry("2026-04-15", "FINANCE", "big", "Spent ₹500"),
+            _entry("2026-04-15", "FINANCE", "mid", "Spent ₹200"),
+        ]
+        rows = export_journal.aggregate(entries, ["subcategory"])
+        assert [r["subcategory"] for r in rows] == ["big", "mid", "small"]
+
+    def test_sort_by_count_desc_when_no_amounts(self):
+        entries = [
+            _entry("2026-04-15", "WORK", "a"),
+            _entry("2026-04-16", "WORK", "b"),
+            _entry("2026-04-17", "WORK", "b"),
+            _entry("2026-04-18", "WORK", "c"),
+            _entry("2026-04-19", "WORK", "c"),
+            _entry("2026-04-20", "WORK", "c"),
+        ]
+        rows = export_journal.aggregate(entries, ["subcategory"])
+        assert [r["subcategory"] for r in rows] == ["c", "b", "a"]
+
+
+class TestPivotWriters:
+    def test_csv_header_order(self):
+        entries = [_entry("2026-04-15", "FINANCE", "food", "Spent ₹150")]
+        rows = export_journal.aggregate(entries, ["subcategory"])
+        buf = io.StringIO()
+        export_journal.write_pivot_csv(rows, ["subcategory"], buf)
+        parsed = list(csv.reader(io.StringIO(buf.getvalue())))
+        assert parsed[0] == ["subcategory", "count", "sum_amount", "first_date", "last_date"]
+        assert parsed[1] == ["food", "1", "150.0", "2026-04-15", "2026-04-15"]
+
+    def test_csv_renders_null_amount_as_empty(self):
+        entries = [_entry("2026-04-15", "WORK", "coding", "Refactor")]
+        rows = export_journal.aggregate(entries, ["category"])
+        buf = io.StringIO()
+        export_journal.write_pivot_csv(rows, ["category"], buf)
+        # Last data row should have an empty sum_amount field, not "None"
+        line = buf.getvalue().splitlines()[1]
+        assert ",None," not in line
+        assert ",," in line  # empty sum_amount
+
+    def test_csv_multi_key_columns(self):
+        entries = [
+            _entry("2026-04-15", "FINANCE", "food", "Lunch ₹150"),
+            _entry("2026-04-16", "WORK", "coding", "Refactor"),
+        ]
+        rows = export_journal.aggregate(entries, ["category", "subcategory"])
+        buf = io.StringIO()
+        export_journal.write_pivot_csv(rows, ["category", "subcategory"], buf)
+        parsed = list(csv.reader(io.StringIO(buf.getvalue())))
+        assert parsed[0] == ["category", "subcategory", "count", "sum_amount", "first_date", "last_date"]
+
+    def test_json_round_trip(self):
+        entries = [_entry("2026-04-15", "FINANCE", "food", "Spent ₹150")]
+        rows = export_journal.aggregate(entries, ["subcategory"])
+        buf = io.StringIO()
+        export_journal.write_pivot_json(rows, buf)
+        payload = json.loads(buf.getvalue())
+        assert payload[0]["subcategory"] == "food"
+        assert payload[0]["sum_amount"] == 150.0
+        assert payload[0]["count"] == 1
+
+
+class TestGroupByCli:
+    @pytest.fixture
+    def journal_dir(self, tmp_path: Path) -> Path:
+        j = tmp_path / "data" / "journal"
+        j.mkdir(parents=True)
+        (j / "2026-04-13.md").write_text(
+            "# 2026-04-13 Journal\n\n## [WORK]\n- [10:00 AM] [WORK/coding] Worked\n\n"
+            "## [PERSONAL]\n\n## [HABITS]\n\n"
+            "## [FINANCE]\n- [1:30 PM] [FINANCE/food] Lunch ₹150\n"
+        )
+        (j / "2026-04-14.md").write_text(
+            "# 2026-04-14 Journal\n\n## [WORK]\n\n## [PERSONAL]\n\n## [HABITS]\n\n"
+            "## [FINANCE]\n- [9:00 AM] [FINANCE/food] Coffee ₹80\n"
+            "- [10:00 AM] [FINANCE/transport] Auto ₹100\n"
+        )
+        return j
+
+    def test_csv_pivot_per_subcategory(self, journal_dir: Path, capsys: pytest.CaptureFixture):
+        rc = export_journal.main([
+            "--data-dir", str(journal_dir.parent),
+            "--category", "FINANCE",
+            "--group-by", "subcategory",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        rows = list(csv.reader(io.StringIO(out)))
+        assert rows[0] == ["subcategory", "count", "sum_amount", "first_date", "last_date"]
+        # food has 2 entries summing ₹230
+        food = next(r for r in rows[1:] if r[0] == "food")
+        assert food[1] == "2"
+        assert food[2] == "230.0"
+
+    def test_json_pivot(self, journal_dir: Path, capsys: pytest.CaptureFixture):
+        rc = export_journal.main([
+            "--data-dir", str(journal_dir.parent),
+            "--group-by", "category",
+            "-f", "json",
+        ])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        by_cat = {r["category"]: r["count"] for r in payload}
+        assert by_cat["FINANCE"] == 3
+        assert by_cat["WORK"] == 1
+
+    def test_unknown_group_key_errors(self, journal_dir: Path):
+        with pytest.raises(SystemExit):
+            export_journal.main([
+                "--data-dir", str(journal_dir.parent),
+                "--group-by", "totally-invalid",
+            ])
+
+    def test_partial_unknown_keys_error(self, journal_dir: Path):
+        # Mix of valid + invalid → should still reject the whole call.
+        with pytest.raises(SystemExit):
+            export_journal.main([
+                "--data-dir", str(journal_dir.parent),
+                "--group-by", "category,nonsense",
+            ])
+
+    def test_writes_to_file(self, journal_dir: Path, tmp_path: Path):
+        out_path = tmp_path / "pivot.csv"
+        rc = export_journal.main([
+            "--data-dir", str(journal_dir.parent),
+            "--group-by", "subcategory",
+            "-o", str(out_path),
+        ])
+        assert rc == 0
+        body = out_path.read_text()
+        assert body.startswith("subcategory,count,sum_amount,first_date,last_date")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

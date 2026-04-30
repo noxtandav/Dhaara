@@ -309,6 +309,21 @@ python scripts/export_journal.py --from 2026-04-01 --to 2026-04-30 -f json
 
 It parses every `[time]`, `[CATEGORY/subcategory]`, mood, and text into one row per bullet — no extra dependencies beyond the standard library (PyYAML is used only if you let it auto-discover `data_dir` from `config.yaml`).
 
+For pivots instead of raw rows, add `--group-by`:
+
+```bash
+# How is my finance spending distributed across subcategories?
+python scripts/export_journal.py --category FINANCE --group-by subcategory
+
+# Cross-tab category × subcategory across the whole journal
+python scripts/export_journal.py --group-by category,subcategory
+
+# Mood frequency + first/last date you tagged each one
+python scripts/export_journal.py --group-by mood -f json
+```
+
+Each pivot row carries the grouping columns plus `count`, `sum_amount` (₹ totals for FINANCE rows; empty otherwise), `first_date`, and `last_date`. Rows sort by spending desc when any group has amounts, else by count desc. Valid keys: `category`, `subcategory`, `mood`, `date` (any combination, comma-separated).
+
 ### Quick stats
 
 For a roll-up instead of raw rows, there's `scripts/stats.py`. It reuses the same parser and prints per-category counts, finance totals (with subcategory breakdown + top expenses), habit streaks, and mood distribution:
