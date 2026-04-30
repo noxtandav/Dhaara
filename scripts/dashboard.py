@@ -11,6 +11,7 @@ Sections (in order):
     1. Streak status (current + longest)
     2. End-of-period snapshot ("today" relative to --to)
     3. Period summary (entries, days active, per-category counts)
+    3a. (optional, --compare-prev) Week-over-week deltas
     4. Activity calendar (markdown table from activity_heatmap)
     5. Finance highlights (total, top categories, top expenses)
     6. Habits with longest-consecutive-day streaks
@@ -23,19 +24,19 @@ Reuses:
     stats.compute_stats
     activity_heatmap.build_calendar + render_markdown
     mood_timeline.build_timeline + render_markdown (in part)
-    weekly_summary.truncate
+    weekly_summary.truncate + previous_period + compute_diff +
+        render_diff_section
 
 Examples
 --------
   # Last 7 days, stdout
   python scripts/dashboard.py
 
-  # Specific ISO week to a file
-  python scripts/dashboard.py --from 2026-04-13 --to 2026-04-19 \\
-      -o ~/PAI/DhaaraData/dashboards/2026-W16.md
+  # Specific ISO week with week-over-week deltas
+  python scripts/dashboard.py --from 2026-04-13 --to 2026-04-19 --compare-prev
 
-  # Last month
-  python scripts/dashboard.py --since 4w
+  # Save to a file
+  python scripts/dashboard.py --since 4w -o ~/PAI/DhaaraData/dashboards/last-month.md
 """
 from __future__ import annotations
 
@@ -58,7 +59,12 @@ from activity_heatmap import build_calendar, render_markdown as render_calendar_
 from mood_timeline import build_timeline  # noqa: E402
 from streak import compute_streak_info  # noqa: E402
 from today import build_report as build_today_report  # noqa: E402
-from weekly_summary import truncate  # noqa: E402
+from weekly_summary import (  # noqa: E402
+    compute_diff,
+    previous_period,
+    render_diff_section,
+    truncate,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -233,12 +239,27 @@ def section_notable(entries: list[Entry]) -> list[str]:
 # Top-level builder
 # ---------------------------------------------------------------------------
 
+def section_compare_prev(
+    journal_dir: Path,
+    curr_stats: dict,
+    start: date,
+    end: date,
+) -> list[str]:
+    """Pull the same-length window before [start, end] and emit the diff."""
+    prev_start, prev_end = previous_period(start, end)
+    prev_entries = collect_entries(journal_dir, prev_start, prev_end, None)
+    prev_stats = compute_stats(prev_entries)
+    diff = compute_diff(curr_stats, prev_stats)
+    return list(render_diff_section(diff))
+
+
 def build_dashboard(
     data_dir: Path,
     start: date,
     end: date,
     *,
     now: datetime | None = None,
+    compare_prev: bool = False,
 ) -> str:
     """Assemble all sections into one markdown document."""
     now = now or datetime.now()
@@ -258,6 +279,8 @@ def build_dashboard(
     lines.extend(section_streak(data_dir, today=end))
     lines.extend(section_today(data_dir, end))
     lines.extend(section_period_summary(stats, span_days))
+    if compare_prev:
+        lines.extend(section_compare_prev(journal_dir, stats, start, end))
     lines.extend(section_activity(entries, start, end))
     lines.extend(section_finance(stats))
     lines.extend(section_habits(stats))
@@ -282,6 +305,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--since",
         help="Relative shortcut: '7d', '4w', '6m', '1y'. Default = last 7 days.",
+    )
+    parser.add_argument(
+        "--compare-prev",
+        action="store_true",
+        help=(
+            "Add a 'Compared to the previous week' section with deltas. "
+            "Pulls the same-length window immediately before the dashboard's "
+            "date range."
+        ),
     )
     parser.add_argument(
         "-o", "--output", default="-",
@@ -309,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
 
-    body = build_dashboard(data_dir, start, end)
+    body = build_dashboard(data_dir, start, end, compare_prev=args.compare_prev)
 
     if args.output == "-":
         sys.stdout.write(body)

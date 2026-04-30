@@ -338,11 +338,14 @@ python scripts/dashboard.py
 python scripts/dashboard.py --from 2026-04-13 --to 2026-04-19 \
     -o ~/PAI/DhaaraData/dashboards/2026-W16.md
 
+# With week-over-week deltas
+python scripts/dashboard.py --since 7d --compare-prev
+
 # Last month
 python scripts/dashboard.py --since 4w
 ```
 
-Empty days/sections are gracefully omitted, so the report is always tight regardless of how much you journaled. Pure markdown — paste anywhere, archive as a long-term log, or pipe into a Telegram bot.
+Empty days/sections are gracefully omitted, so the report is always tight regardless of how much you journaled. Pure markdown — paste anywhere, archive as a long-term log, or pipe into a Telegram bot. With `--compare-prev`, a "Compared to the previous week" section lands between the period summary and the activity calendar, surfacing entry-count, spending, mood-drift, and top finance shifts vs. the same-length window before.
 
 ### Today
 

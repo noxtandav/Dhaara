@@ -324,5 +324,83 @@ class TestCli:
         assert out.startswith("# Dhaara Dashboard")
 
 
+# ---------------------------------------------------------------------------
+# --compare-prev
+# ---------------------------------------------------------------------------
+
+class TestCompareprev:
+    def test_section_absent_by_default(self, data_dir: Path):
+        body = dashboard.build_dashboard(
+            data_dir, date(2026, 4, 13), date(2026, 4, 14),
+            now=datetime(2026, 4, 30, 14, 30),
+        )
+        assert "## Compared to the previous week" not in body
+
+    def test_section_present_when_flag_set(self, data_dir: Path):
+        body = dashboard.build_dashboard(
+            data_dir, date(2026, 4, 13), date(2026, 4, 14),
+            now=datetime(2026, 4, 30, 14, 30),
+            compare_prev=True,
+        )
+        assert "## Compared to the previous week" in body
+
+    def test_section_lands_between_period_summary_and_activity(self, data_dir: Path):
+        body = dashboard.build_dashboard(
+            data_dir, date(2026, 4, 13), date(2026, 4, 14),
+            now=datetime(2026, 4, 30, 14, 30),
+            compare_prev=True,
+        )
+        period_idx = body.find("## Period summary")
+        diff_idx = body.find("## Compared to the previous week")
+        activity_idx = body.find("## Activity")
+        assert period_idx >= 0 and diff_idx >= 0 and activity_idx >= 0
+        assert period_idx < diff_idx < activity_idx
+
+    def test_empty_prev_window_renders_new(self, data_dir: Path):
+        # Window 2026-04-13..14 → previous window is 2026-04-11..12, which the
+        # fixture has nothing in. Diff should render "new" for entries / pct.
+        body = dashboard.build_dashboard(
+            data_dir, date(2026, 4, 13), date(2026, 4, 14),
+            now=datetime(2026, 4, 30, 14, 30),
+            compare_prev=True,
+        )
+        assert "## Compared to the previous week" in body
+        assert "new" in body.lower()
+
+    def test_section_compare_prev_isolated(self, data_dir: Path):
+        from stats import compute_stats
+        from export_journal import collect_entries
+        curr_entries = collect_entries(
+            data_dir / "journal", date(2026, 4, 13), date(2026, 4, 14), None,
+        )
+        curr_stats = compute_stats(curr_entries)
+        lines = dashboard.section_compare_prev(
+            data_dir / "journal", curr_stats, date(2026, 4, 13), date(2026, 4, 14),
+        )
+        # The diff section starts with the heading itself.
+        assert lines[0].startswith("## Compared to the previous week")
+
+    def test_cli_flag_propagates(self, data_dir: Path, capsys: pytest.CaptureFixture):
+        rc = dashboard.main([
+            "--data-dir", str(data_dir),
+            "--from", "2026-04-13",
+            "--to", "2026-04-14",
+            "--compare-prev",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "## Compared to the previous week" in out
+
+    def test_cli_without_flag_omits_section(self, data_dir: Path, capsys: pytest.CaptureFixture):
+        rc = dashboard.main([
+            "--data-dir", str(data_dir),
+            "--from", "2026-04-13",
+            "--to", "2026-04-14",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "## Compared to the previous week" not in out
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
