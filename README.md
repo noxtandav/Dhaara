@@ -326,6 +326,24 @@ python scripts/stats.py --category HABITS
 
 Currency parsing is best-effort — it understands `₹`, `Rs`, `$`, and bare numbers in FINANCE entries, plus `k`, `lakh`/`lac`, and `cr`/`crore` multipliers.
 
+### Combined dashboard
+
+For an end-of-week or end-of-month review, `scripts/dashboard.py` weaves every visualization in the toolset into a single Markdown document — streak, snapshot, period summary, activity calendar, finance highlights, habits, mood timeline, and notable moments:
+
+```bash
+# Last 7 days, stdout
+python scripts/dashboard.py
+
+# Specific ISO week to a file
+python scripts/dashboard.py --from 2026-04-13 --to 2026-04-19 \
+    -o ~/PAI/DhaaraData/dashboards/2026-W16.md
+
+# Last month
+python scripts/dashboard.py --since 4w
+```
+
+Empty days/sections are gracefully omitted, so the report is always tight regardless of how much you journaled. Pure markdown — paste anywhere, archive as a long-term log, or pipe into a Telegram bot.
+
 ### Today
 
 The "what have I journaled this morning?" glance — a focused, single-day breakdown:
