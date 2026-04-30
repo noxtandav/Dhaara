@@ -4,7 +4,7 @@ One file per day: journal/YYYY-MM-DD.md
 All entries for a day live in one file, organized by ## [CATEGORY] sections.
 All reads/writes are confined to data_dir.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import re
 
@@ -106,6 +106,34 @@ class JournalStore:
             # Last section: append at end of file
             before = content.rstrip()
             return before + "\n" + entry + "\n"
+
+    def read_journal_range(self, end_date: datetime, days: int) -> dict:
+        """
+        Read journal entries across a date range.
+
+        Returns a dict with:
+          - "content": concatenated markdown of all days with entries
+          - "days_with_entries": number of days that had journal files
+          - "days_requested": total days in the range
+        """
+        parts: list[str] = []
+        days_with_entries = 0
+
+        for offset in range(days):
+            day = end_date - timedelta(days=offset)
+            content = self.read_day(day)
+            if content:
+                days_with_entries += 1
+                parts.append(content)
+
+        # Reverse so entries are chronological (oldest first)
+        parts.reverse()
+
+        return {
+            "content": "\n\n---\n\n".join(parts) if parts else "(No entries found.)",
+            "days_with_entries": days_with_entries,
+            "days_requested": days,
+        }
 
     # -------------------------------------------------------------------------
     # Entry management (list / edit / delete by line number)

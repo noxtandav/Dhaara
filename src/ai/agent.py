@@ -15,7 +15,7 @@ from .prompts import build_system_prompt
 from .graph import build_graph
 from ..journal.store import JournalStore
 from ..config import load_config
-from ..context.telos import read_telos
+from ..context.telos import read_telos, read_all_telos
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,8 @@ class DhaaraAgent:
                 return self._tool_read_day(input_data)
             elif name == "read_telos":
                 return self._tool_read_telos(input_data)
+            elif name == "telos_insights":
+                return self._tool_telos_insights(input_data, timestamp)
             elif name == "list_entries":
                 return self._tool_list_entries(input_data, timestamp)
             elif name == "edit_entry":
@@ -120,6 +122,38 @@ class DhaaraAgent:
 
     def _tool_read_telos(self, data: dict) -> str:
         return read_telos(self._telos_dir, data["background"])
+
+    def _tool_telos_insights(self, data: dict, timestamp: datetime) -> str:
+        days = min(data["days"], 90)
+        result = self._store.read_journal_range(timestamp, days)
+
+        telos_context = read_all_telos(self._telos_dir)
+
+        coverage = f"{result['days_with_entries']}/{result['days_requested']} days have entries"
+        if result["days_with_entries"] < 3:
+            data_warning = (
+                "⚠ INSUFFICIENT DATA: Only {0} day(s) of journal entries found in this period. "
+                "Tell the user that conclusions are based on very limited data and they should "
+                "record more entries for meaningful insights."
+            ).format(result["days_with_entries"])
+        elif result["days_with_entries"] < result["days_requested"] * 0.3:
+            data_warning = (
+                "⚠ LIMITED DATA: Only {0} out of {1} days have entries. "
+                "Mention to the user that insights are based on sparse data and "
+                "more consistent journaling would improve accuracy."
+            ).format(result["days_with_entries"], result["days_requested"])
+        else:
+            data_warning = ""
+
+        parts = [
+            f"## Data Coverage\n{coverage}",
+        ]
+        if data_warning:
+            parts.append(data_warning)
+        parts.append(f"## TELOS Context\n{telos_context}")
+        parts.append(f"## Journal Entries ({days} days)\n{result['content']}")
+
+        return "\n\n".join(parts)
 
     def _tool_list_entries(self, data: dict, timestamp: datetime) -> str:
         date_str = data.get("date")

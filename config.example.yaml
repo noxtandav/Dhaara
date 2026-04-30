@@ -8,6 +8,11 @@ data_dir: "~/PAI/DhaaraData"
 # IANA timezone for timestamps in journal entries.
 timezone: "Asia/Kolkata"
 
+# Path to the shared TELOS context directory. Can be absolute or use ~.
+# TELOS files (work.md, personal.md) let the agent understand your goals and priorities.
+# Defaults to <data_dir>/../_telos if not set.
+# telos_dir: "~/PAI/_telos"
+
 # Which AI backend to use. One of: "bedrock", "openrouter".
 ai:
   provider: "bedrock"

@@ -8,7 +8,9 @@ from zoneinfo import ZoneInfo
 def build_system_prompt(tz: ZoneInfo) -> str:
     today = datetime.now(tz).strftime("%A, %B %d, %Y")
 
-    return f"""You are Dhaara, a personal AI journal assistant. Every entry goes into ONE file per day.
+    return f"""Today is {today}.
+
+You are Dhaara, a personal AI journal assistant. Every entry goes into ONE file per day.
 
 ## Daily File Format
 Each day is one file: `journal/YYYY-MM-DD.md`
@@ -81,6 +83,12 @@ Subcategories are free-form lowercase words. Use the common ones above when they
 11. EDITING/DELETING: When the user wants to edit or delete an entry, ALWAYS call list_entries first to get current line numbers. Never guess line numbers — they shift after every edit or delete. When the entry is from a past day, pass the same `date` (YYYY-MM-DD) to `edit_entry`/`delete_entry` that you passed to `list_entries` — otherwise you will edit the wrong day's file.
 
 12. LISTING: When showing entries to the user, relay the list_entries output EXACTLY as-is. Do NOT summarize, reformat, or drop any fields (time, category, subcategory). The user expects to see the full metadata.
+
+13. TELOS INSIGHTS: When the user asks for insights, progress, alignment, spending habits, time analysis, or any reflection over a period — use the `telos_insights` tool. Structure your response as:
+   - **Stats**: Entry counts by category, spending totals, habit streaks, mood patterns — concrete numbers from the data.
+   - **TELOS Alignment**: What activities align with their stated goals vs. what doesn't. Call out specific entries that support or contradict TELOS priorities.
+   - **Recommendations**: Actionable course corrections based on the gap between goals and actual behaviour.
+   If the tool result includes a data warning (insufficient or limited data), relay that prominently at the start — do not hide it. Be honest about what the data can and cannot tell.
 
 ## Tools
 """
@@ -208,6 +216,30 @@ TOOLS = [
                         },
                     },
                     "required": ["line_number", "new_text"],
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "telos_insights",
+            "description": (
+                "Analyse journal entries against the user's TELOS goals and priorities. "
+                "Use this when the user asks for insights, alignment analysis, spending habits vs goals, "
+                "time wasted on non-goal activities, progress reviews, or any reflection over a period. "
+                "Returns journal entries for the period along with TELOS context. "
+                "You must then analyse the data and respond with: stats, alignment analysis, and recommendations."
+            ),
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to look back (e.g. 7 for last week, 30 for last month). Max 90.",
+                        }
+                    },
+                    "required": ["days"],
                 }
             },
         }

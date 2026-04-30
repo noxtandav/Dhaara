@@ -46,6 +46,22 @@ bot:   L12: - [1:30 PM] [FINANCE/food] Spent ₹150 on lunch
 
 you:   delete the swiggy one
 bot:   Deleted: - [8:10 PM] [FINANCE/food] Ordered dinner from Swiggy ₹420
+
+you:   how am I tracking against my work TELOS this month?
+bot:   ## Stats
+       - 64 entries across 10 days (33% active)
+       - Top finance: ₹60k investments, ₹55k EMI, ₹11k subscriptions
+       - 9 distinct moods, satisfied (2) and concerned (2) lead
+
+       ## TELOS Alignment
+       ✓ "Ship Dhaara Phase 1" — Apr 16 "Found critical bugs and fixed
+         those today" directly supports this
+       ⚠ "Reduce infra bill 20%" — no infra entries; ₹16k subscriptions
+         trending up instead
+
+       ## Recommendations
+       - The Hitachi/Clever vendor change shifts your runway. Refine
+         the income-replacement plan in TELOS.
 ```
 
 Every entry is appended to today's single markdown file under the right section. Nothing hidden. Nothing proprietary. Every bullet is timestamped and tagged inline, so the file itself is both a journal and an index.
@@ -321,6 +337,18 @@ TELOS is a personal-context framework from Daniel Miessler. Drop your work and l
 
 The agent re-reads these on every turn, so edit freely — no restart needed.
 
+### Asking for TELOS insights
+
+Ask the bot for reflection in plain English — *"how am I tracking against my work goals this month?"* / *"is my spending aligned with my TELOS?"* / *"what should I course-correct on?"* — and the agent calls a dedicated `telos_insights` tool that pulls the last N days of journal entries (capped at 90), bundles them with your TELOS files, and returns a structured response with three sections:
+
+- **Stats** — concrete numbers: entry counts, finance totals, habit streaks, mood patterns.
+- **TELOS Alignment** — which entries support each TELOS goal, which contradict, which goals see no action at all.
+- **Recommendations** — actionable course corrections based on the gap.
+
+The tool also computes a **data-quality flag** before responding. If you have fewer than 3 days of entries in the requested window, the response leads with `⚠ INSUFFICIENT DATA`. If coverage is below 30%, it leads with `⚠ LIMITED DATA`. The agent is instructed to relay these warnings prominently rather than glossing over them — sparse journaling produces sparse insights, and pretending otherwise is worse than admitting it.
+
+The optional `telos_dir:` config knob lets you point at a custom location (default is `<data_dir>/../_telos/`, shared across PAI agents).
+
 ---
 
 ## Architecture
@@ -337,7 +365,7 @@ Telegram  ──►  Sarvam AI  ──►  AI Agent  ──►  Journal Store
 Key design choices:
 
 - **Provider abstraction** — `src/ai/provider.py` lets you plug in new AI backends without touching the agent loop.
-- **Typed tool interface** — the agent can only call a small, audited set of tools: `record_entry`, `read_today`, `read_day`, `read_telos`, `list_entries`, `edit_entry`, `delete_entry`. Every path is resolved inside `data_dir`; traversal attempts are rejected.
+- **Typed tool interface** — the agent can only call a small, audited set of tools: `record_entry`, `read_today`, `read_day`, `read_telos`, `telos_insights`, `list_entries`, `edit_entry`, `delete_entry`. Every path is resolved inside `data_dir`; traversal attempts are rejected.
 - **Local timezone** — timestamps honour whatever IANA zone you set in `config.yaml`.
 - **Stateless per conversation** — `/clear` resets context; your daily markdown files are the long-term memory.
 
