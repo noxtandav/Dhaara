@@ -123,7 +123,16 @@ python scripts/check_config.py
 
 A static linter that catches the things that bite first-time users — leftover placeholders from `config.example.yaml`, missing keys for the chosen AI provider, invalid timezones, oddly-shaped credentials. Exits non-zero on errors so you can wire it into a pre-deploy step. Add `-f json` for machine-readable output.
 
-### 4. Run
+### 4. Initialize the data layout
+
+```bash
+python scripts/init.py            # creates data_dir/, journal/, _telos/ + seeds example TELOS files
+python scripts/init.py --dry-run  # see what would happen first
+```
+
+Idempotent — re-running tells you what was already there and never overwrites your TELOS files. Pairs naturally with `check_config.py`: the linter validates your config, `init.py` realizes the file system that config points at.
+
+### 5. Run
 
 ```bash
 # Foreground (for testing)
