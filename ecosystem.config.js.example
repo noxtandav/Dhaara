@@ -1,29 +1,143 @@
-// PM2 Configuration Template for Dhaara
+// PM2 process manifest for Dhaara — public template.
 //
-// Copy this file to ".config/pm2.config.js" or refer to guidelines.
-// Then run:
-//   pm2 start ecosystem.config.js --env=production
+// Quick start:
+//   cp ecosystem.config.js.example ecosystem.config.js
+//   # edit paths if your data_dir isn't ~/PAI/DhaaraData
+//   pm2 start ecosystem.config.js
+//   pm2 save && pm2 startup    # survive reboots (run the printed sudo line once)
+//
+// What you get:
+//
+//   dhaara             always-on Telegram bot
+//   dhaara-weekly      Sunday 21:07 → markdown weekly review
+//                      → <data_dir>/weekly/YYYY-Www.md
+//   dhaara-dashboard   Daily 23:53 → 7-day rolling dashboard
+//                      → <data_dir>/dashboards/YYYY-MM-DD.md
+//   dhaara-streak      Daily 19:37 → desktop nudge if streak broken
+//                      (macOS via osascript; swap for `notify-send` on Linux)
+//
+// Cron caveats:
+//   - PM2 uses local OS time. Match the timezone in your config.yaml.
+//   - cron_restart requires autorestart:false, otherwise PM2 immediately
+//     re-runs the script on exit and "every Sunday 21:07" becomes "as
+//     fast as Python can finish."
+//   - Off-the-round-minute schedules (07/53/37) avoid the fleet-wide
+//     thundering herd you'd get from `0 21`, `0 0`, `0 19`.
+//
+// Disabling cron jobs you don't want:
+//   pm2 stop dhaara-streak       # then `pm2 save` to persist
+
+const path = require("path");
+const home = require("os").homedir();
+
+// ─── EDIT THESE TWO PATHS to match your setup ──────────────────────────
+// `dataDir` should match `data_dir:` in your config.yaml.
+// `logsDir` is where PM2 writes process logs.
+const dataDir = path.join(home, "PAI", "DhaaraData");
+const logsDir = path.join(__dirname, "logs");
+// ───────────────────────────────────────────────────────────────────────
+
+// Compose a shell command that cd's into the repo so relative paths work,
+// then run via /bin/zsh so $(date ...) and shell variables expand.
+// Switch to /bin/bash if you don't have zsh.
+const sh = (cmd) => ({
+  script: "/bin/zsh",
+  args: ["-c", `cd ${__dirname} && ${cmd}`],
+  interpreter: "none",
+});
 
 module.exports = {
-  apps : [{
-    name: "dhaara",
-    script: "./venv/bin/python",
-    args: "-m src.main",
-    cwd: __dirname,
-    interpreter: "none",
-    autorestart: true,  // auto restart if fails
-    watch: false,
-    max_restarts: 10,
-    env: {
-      NODE_ENV: "development",
-      PYTHONPATH: __dirname,           // Include project root in Python path
+  apps: [
+    // ──────────────────────────────────────────────────────────────────
+    // 1. The Telegram bot itself — always on, restarts on failure.
+    // ──────────────────────────────────────────────────────────────────
+    {
+      name: "dhaara",
+      script: "./venv/bin/python",
+      args: "-m src.main",
+      cwd: __dirname,
+      interpreter: "none",
+      autorestart: true,
+      watch: false,
+      max_restarts: 10,
+      env: {
+        NODE_ENV: "development",
+        PYTHONPATH: __dirname,
+      },
+      env_production: {
+        NODE_ENV: "production",
+      },
+      error_file: path.join(logsDir, "dhaara-err.log"),
+      out_file: path.join(logsDir, "dhaara-out.log"),
+      time: false,
     },
-    env_production: {
-      NODE_ENV: "production",
-      // Use persistent db for production, others are relevant
+
+    // ──────────────────────────────────────────────────────────────────
+    // 2. Weekly review — Sunday 21:07 local. Writes a markdown summary
+    //    of the just-completed ISO week to <data_dir>/weekly/.
+    //    See: scripts/weekly_summary.py
+    // ──────────────────────────────────────────────────────────────────
+    {
+      name: "dhaara-weekly",
+      ...sh(
+        'WEEK=$(date +%G-W%V); ' +
+        `./venv/bin/python scripts/weekly_summary.py --week "$WEEK" --compare-prev ` +
+        `-o "${dataDir}/weekly/$WEEK.md"`
+      ),
+      cwd: __dirname,
+      autorestart: false,
+      cron_restart: "7 21 * * 0",
+      env: { PYTHONPATH: __dirname },
+      out_file: path.join(logsDir, "weekly-out.log"),
+      error_file: path.join(logsDir, "weekly-err.log"),
+      time: true,
     },
-    error_file: "./logs/dhaara-err.log",
-    out_file: "./logs/dhaara-out.log",
-    time: false
-  }]
-}
+
+    // ──────────────────────────────────────────────────────────────────
+    // 3. Daily dashboard — every night at 23:53 local. Writes a
+    //    rolling 7-day digest to <data_dir>/dashboards/.
+    //    See: scripts/dashboard.py
+    // ──────────────────────────────────────────────────────────────────
+    {
+      name: "dhaara-dashboard",
+      ...sh(
+        `./venv/bin/python scripts/dashboard.py --since 7d --compare-prev ` +
+        `-o "${dataDir}/dashboards/$(date +%F).md"`
+      ),
+      cwd: __dirname,
+      autorestart: false,
+      cron_restart: "53 23 * * *",
+      env: { PYTHONPATH: __dirname },
+      out_file: path.join(logsDir, "dashboard-out.log"),
+      error_file: path.join(logsDir, "dashboard-err.log"),
+      time: true,
+    },
+
+    // ──────────────────────────────────────────────────────────────────
+    // 4. Streak watch — daily 19:37 local. Notifies via macOS
+    //    `osascript` only when the current streak is 0 (broken or
+    //    never-started).
+    //
+    //    Linux users: replace the `osascript ...` line with:
+    //      notify-send "Dhaara" "$MSG"
+    //    Disable entirely with: pm2 stop dhaara-streak && pm2 save
+    // ──────────────────────────────────────────────────────────────────
+    {
+      name: "dhaara-streak",
+      ...sh(
+        'STREAK=$(./venv/bin/python scripts/streak.py --quiet); ' +
+        'if [ "$STREAK" = "0" ]; then ' +
+          'MSG=$(./venv/bin/python scripts/streak.py); ' +
+          'osascript -e "display notification \\"$MSG\\" with title \\"Dhaara\\""; ' +
+        'fi'
+      ),
+      cwd: __dirname,
+      autorestart: false,
+      cron_restart: "37 19 * * *",
+      env: { PYTHONPATH: __dirname },
+      out_file: path.join(logsDir, "streak-out.log"),
+      error_file: path.join(logsDir, "streak-err.log"),
+      time: true,
+    },
+  ],
+};

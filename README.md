@@ -141,9 +141,12 @@ python -m src.main
 # Production: keep it alive with PM2
 npm install -g pm2
 cp ecosystem.config.js.example ecosystem.config.js
-pm2 start ecosystem.config.js --name dhaara
+# (edit dataDir in ecosystem.config.js to match your config.yaml's data_dir)
+pm2 start ecosystem.config.js
 pm2 save && pm2 startup
 ```
+
+The PM2 manifest registers four apps: the always-on bot itself, plus three scheduled jobs that fire automatically — `dhaara-weekly` (Sunday-night markdown weekly review), `dhaara-dashboard` (nightly rolling 7-day digest), and `dhaara-streak` (evening desktop nudge if your streak breaks). Comment out or `pm2 stop <name>` any you don't want.
 
 Message your bot. That's it.
 
