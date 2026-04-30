@@ -56,6 +56,73 @@ class AgentState(TypedDict, total=False):
     final_response: str | None
 
 
+# ---------------------------------------------------------------------------
+# Pure node functions (no closure capture — testable in isolation)
+# ---------------------------------------------------------------------------
+
+def verify_response(state: AgentState) -> dict:
+    """Terminal node. Either passes the model's text through as
+    final_response, or replaces it with the failure message when the
+    end-of-turn output looks like a hallucination.
+
+    Hallucination guard: only fires when the model produced a final
+    reply without calling ANY tool (`tool_round == 0`). Calling a read
+    tool (`list_entries`, `read_today`, `read_day`, `telos_insights`,
+    `read_telos`) returns real data the model legitimately describes
+    using words like "recorded" / "logged"; that's not a hallucination.
+
+    See iteration 19 in LOOP_CHANGELOG.md for the trade-off rationale.
+    """
+    stop = state.get("last_stop_reason", "")
+
+    if stop == "end_turn":
+        last = state["messages"][-1]
+        text_parts = [b["text"] for b in last["content"] if "text" in b]
+        final = "\n".join(text_parts).strip()
+
+        tool_round = state.get("tool_round", 0)
+        if tool_round == 0 and _SUCCESS_CLAIM.search(final):
+            logger.warning(
+                "Tool hallucination: claimed success without calling any tool. text=%r",
+                final,
+            )
+            final = _FAILURE_RESPONSE
+            return {
+                "messages": [
+                    {"role": "assistant", "content": [{"text": final}]}
+                ],
+                "final_response": final,
+            }
+
+        return {"final_response": final or _FAILURE_RESPONSE}
+
+    logger.warning(
+        "Loop exited without end_turn: stop=%r tool_round=%d",
+        stop, state.get("tool_round", 0),
+    )
+    return {
+        "messages": [
+            {"role": "assistant", "content": [{"text": _FAILURE_RESPONSE}]}
+        ],
+        "final_response": _FAILURE_RESPONSE,
+    }
+
+
+def route_after_llm(state: AgentState) -> str:
+    """Branch after `call_llm`: keep looping if the model wants another
+    tool call (and we're under MAX_TOOL_ROUNDS), otherwise wrap up."""
+    stop = state.get("last_stop_reason", "")
+    if stop == "tool_use" and state.get("tool_round", 0) < MAX_TOOL_ROUNDS:
+        return "execute_tools"
+    return "verify_response"
+
+
+# ---------------------------------------------------------------------------
+# Graph builder (call_llm + execute_tools stay closure-bound — they need
+# `ai` and `execute_tool` from the caller)
+# ---------------------------------------------------------------------------
+
+
 def build_graph(
     ai: AIProvider,
     execute_tool: Callable[[str, dict, datetime], str],
@@ -111,61 +178,8 @@ def build_graph(
             "mutating_tool_called": mutating,
         }
 
-    def verify_response(state: AgentState) -> dict:
-        stop = state.get("last_stop_reason", "")
-
-        if stop == "end_turn":
-            last = state["messages"][-1]
-            text_parts = [b["text"] for b in last["content"] if "text" in b]
-            final = "\n".join(text_parts).strip()
-
-            # Hallucination check: only fire when the model produced a final
-            # reply without calling ANY tool. The previous gate
-            # (`not mutating_tool_called`) over-fired on the read path:
-            # `list_entries` / `read_today` / `read_day` return real data
-            # that the model legitimately describes using words like
-            # "recorded" / "logged", which the regex would then trip on.
-            #
-            # tool_round == 0 means the model never reached execute_tools,
-            # i.e. it composed its reply purely from training-time priors.
-            # That's the genuine hallucination case worth catching.
-            #
-            # Trade-off: a model that calls *only* a read tool and then
-            # claims to have written something is no longer caught here.
-            # That failure mode is rare, the on-disk journal is unaffected,
-            # and the user will notice the missing entry on the next read.
-            tool_round = state.get("tool_round", 0)
-            if tool_round == 0 and _SUCCESS_CLAIM.search(final):
-                logger.warning(
-                    "Tool hallucination: claimed success without calling any tool. text=%r",
-                    final,
-                )
-                final = _FAILURE_RESPONSE
-                return {
-                    "messages": [
-                        {"role": "assistant", "content": [{"text": final}]}
-                    ],
-                    "final_response": final,
-                }
-
-            return {"final_response": final or _FAILURE_RESPONSE}
-
-        logger.warning(
-            "Loop exited without end_turn: stop=%r tool_round=%d",
-            stop, state.get("tool_round", 0),
-        )
-        return {
-            "messages": [
-                {"role": "assistant", "content": [{"text": _FAILURE_RESPONSE}]}
-            ],
-            "final_response": _FAILURE_RESPONSE,
-        }
-
-    def route_after_llm(state: AgentState) -> str:
-        stop = state.get("last_stop_reason", "")
-        if stop == "tool_use" and state.get("tool_round", 0) < MAX_TOOL_ROUNDS:
-            return "execute_tools"
-        return "verify_response"
+    # verify_response and route_after_llm live at module scope (above)
+    # so they're directly testable without spinning up the full graph.
 
     builder = StateGraph(AgentState)
     builder.add_node("call_llm", call_llm)
