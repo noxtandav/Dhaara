@@ -119,9 +119,25 @@ def build_graph(
             text_parts = [b["text"] for b in last["content"] if "text" in b]
             final = "\n".join(text_parts).strip()
 
-            if not state.get("mutating_tool_called") and _SUCCESS_CLAIM.search(final):
+            # Hallucination check: only fire when the model produced a final
+            # reply without calling ANY tool. The previous gate
+            # (`not mutating_tool_called`) over-fired on the read path:
+            # `list_entries` / `read_today` / `read_day` return real data
+            # that the model legitimately describes using words like
+            # "recorded" / "logged", which the regex would then trip on.
+            #
+            # tool_round == 0 means the model never reached execute_tools,
+            # i.e. it composed its reply purely from training-time priors.
+            # That's the genuine hallucination case worth catching.
+            #
+            # Trade-off: a model that calls *only* a read tool and then
+            # claims to have written something is no longer caught here.
+            # That failure mode is rare, the on-disk journal is unaffected,
+            # and the user will notice the missing entry on the next read.
+            tool_round = state.get("tool_round", 0)
+            if tool_round == 0 and _SUCCESS_CLAIM.search(final):
                 logger.warning(
-                    "Tool hallucination: claimed success without mutating tool. text=%r",
+                    "Tool hallucination: claimed success without calling any tool. text=%r",
                     final,
                 )
                 final = _FAILURE_RESPONSE
