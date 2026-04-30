@@ -317,6 +317,23 @@ python scripts/stats.py --category HABITS
 
 Currency parsing is best-effort — it understands `₹`, `Rs`, `$`, and bare numbers in FINANCE entries, plus `k`, `lakh`/`lac`, and `cr`/`crore` multipliers.
 
+### Mood timeline
+
+The agent already tags entries with optional moods. `scripts/mood_timeline.py` adds the missing time dimension — when did "anxious" appear? Was it a one-day spike or a sustained pattern?
+
+```bash
+# Last 30 days, ANSI heatmap (one row per mood, one column per day)
+python scripts/mood_timeline.py
+
+# Specific range, markdown for embedding in a journal note
+python scripts/mood_timeline.py --from 2026-04-01 --to 2026-04-30 -f markdown
+
+# JSON for a notebook / dashboard
+python scripts/mood_timeline.py --since 6m -f json
+```
+
+Heatmap cells use bar characters (`▁▂▃▄▅▆▇█`) so density reads at a glance even on terminals without color support.
+
 ### Search
 
 Plain markdown is `grep`-able already, but `scripts/search.py` understands the entry structure — filter by category, mood, date range, regex, and case-sensitivity in one go:
