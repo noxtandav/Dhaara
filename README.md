@@ -317,6 +317,26 @@ python scripts/stats.py --category HABITS
 
 Currency parsing is best-effort — it understands `₹`, `Rs`, `$`, and bare numbers in FINANCE entries, plus `k`, `lakh`/`lac`, and `cr`/`crore` multipliers.
 
+### Streak nudge
+
+A glanceable one-liner showing your current streak — designed to live in your shell prompt or status bar:
+
+```bash
+$ python scripts/streak.py
+🔥 5-day streak
+
+$ python scripts/streak.py --quiet         # just the number, for shell prompts
+5
+
+$ python scripts/streak.py --text          # full breakdown
+🔥 Current streak: 5 days
+   Longest streak: 12 days
+   Last entry:     2026-04-30 (today)
+   Total entries:  234 across 87 days
+```
+
+A habit you can see is a habit you keep — drop the short or `--quiet` form into your `PROMPT_COMMAND`, starship config, or tmux status bar, and you'll get a daily nudge for free.
+
 ### Activity calendar
 
 GitHub-contribution-graph-style heatmap that answers "am I journaling consistently?" — rows are weeks, columns are weekdays, cells are bucketed entry counts (`▁▃▅▆▇`). The header line surfaces longest streak, current streak, and best day at a glance.
