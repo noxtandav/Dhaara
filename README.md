@@ -46,25 +46,11 @@ bot:   L12: - [1:30 PM] [FINANCE/food] Spent ₹150 on lunch
 
 you:   delete the swiggy one
 bot:   Deleted: - [8:10 PM] [FINANCE/food] Ordered dinner from Swiggy ₹420
-
-you:   how am I tracking against my work TELOS this month?
-bot:   ## Stats
-       - 64 entries across 10 days (33% active)
-       - Top finance: ₹60k investments, ₹55k EMI, ₹11k subscriptions
-       - 9 distinct moods, satisfied (2) and concerned (2) lead
-
-       ## TELOS Alignment
-       ✓ "Ship Dhaara Phase 1" — Apr 16 "Found critical bugs and fixed
-         those today" directly supports this
-       ⚠ "Reduce infra bill 20%" — no infra entries; ₹16k subscriptions
-         trending up instead
-
-       ## Recommendations
-       - The Hitachi/Clever vendor change shifts your runway. Refine
-         the income-replacement plan in TELOS.
 ```
 
 Every entry is appended to today's single markdown file under the right section. Nothing hidden. Nothing proprietary. Every bullet is timestamped and tagged inline, so the file itself is both a journal and an index.
+
+The agent can also reflect over time when you ask it to — see [§ Asking for TELOS insights](#asking-for-telos-insights) for how it grounds those answers in your actual journal data.
 
 ---
 
@@ -567,7 +553,7 @@ python scripts/search.py "API\b" --regex --match-case --category WORK
 python scripts/search.py "claude" -f json
 
 # Surrounding context: 2 entries before and after each hit
-python scripts/search.py Hitachi --context 2
+python scripts/search.py "rent" --context 2
 ```
 
 Matches are highlighted in bold red on a TTY (use `--color always|never` to override). Exit code is 0 on hits, 1 on no matches — handy for shell scripting.
