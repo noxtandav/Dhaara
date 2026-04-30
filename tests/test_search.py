@@ -326,5 +326,238 @@ class TestCli:
         assert rc == 1
 
 
+# ---------------------------------------------------------------------------
+# expand_with_context
+# ---------------------------------------------------------------------------
+
+class TestExpandWithContext:
+    def test_no_matches_returns_empty(self):
+        entries = [_entry("2026-04-15", "WORK", text="x")]
+        assert search.expand_with_context(entries, [], n=2) == []
+
+    def test_single_match_n0_returns_one_block_one_entry(self):
+        entries = [
+            _entry("2026-04-15", "WORK", text="x"),
+            _entry("2026-04-15", "WORK", text="match here"),
+            _entry("2026-04-15", "WORK", text="y"),
+        ]
+        match = search.Match(entry=entries[1], spans=[(0, 5)])
+        blocks = search.expand_with_context(entries, [match], n=0)
+        assert len(blocks) == 1
+        assert len(blocks[0]) == 1
+        assert blocks[0][0]["is_match"] is True
+
+    def test_n1_pulls_one_before_and_after(self):
+        entries = [
+            _entry("2026-04-13", "WORK", text="before"),
+            _entry("2026-04-14", "WORK", text="match"),
+            _entry("2026-04-15", "WORK", text="after"),
+            _entry("2026-04-16", "WORK", text="far"),
+        ]
+        match = search.Match(entry=entries[1], spans=[(0, 5)])
+        blocks = search.expand_with_context(entries, [match], n=1)
+        assert len(blocks) == 1
+        assert [item["entry"].text for item in blocks[0]] == ["before", "match", "after"]
+        assert [item["is_match"] for item in blocks[0]] == [False, True, False]
+
+    def test_overlapping_windows_merge(self):
+        entries = [_entry("2026-04-13", "WORK", text=str(i)) for i in range(5)]
+        # Match at index 1 and index 3, n=1.
+        # Windows: 0-2 and 2-4 → overlap at index 2 → single block 0..4.
+        m1 = search.Match(entry=entries[1], spans=[(0, 1)])
+        m2 = search.Match(entry=entries[3], spans=[(0, 1)])
+        blocks = search.expand_with_context(entries, [m1, m2], n=1)
+        assert len(blocks) == 1
+        assert len(blocks[0]) == 5
+        # is_match flags should be [False, True, False, True, False]
+        flags = [item["is_match"] for item in blocks[0]]
+        assert flags == [False, True, False, True, False]
+
+    def test_non_overlapping_windows_split(self):
+        entries = [_entry("2026-04-13", "WORK", text=str(i)) for i in range(10)]
+        # Match at indices 1 and 7, n=1. Windows: 0-2 and 6-8 → distinct.
+        m1 = search.Match(entry=entries[1], spans=[(0, 1)])
+        m2 = search.Match(entry=entries[7], spans=[(0, 1)])
+        blocks = search.expand_with_context(entries, [m1, m2], n=1)
+        assert len(blocks) == 2
+        assert [item["entry"].text for item in blocks[0]] == ["0", "1", "2"]
+        assert [item["entry"].text for item in blocks[1]] == ["6", "7", "8"]
+
+    def test_clamps_at_start_and_end(self):
+        entries = [_entry("2026-04-13", "WORK", text=str(i)) for i in range(3)]
+        # Match at index 0 with n=2: window asks for -2 to 2, but should clamp to 0..2.
+        m = search.Match(entry=entries[0], spans=[(0, 1)])
+        blocks = search.expand_with_context(entries, [m], n=2)
+        assert len(blocks) == 1
+        assert len(blocks[0]) == 3  # not 5 (no negative indices)
+
+    def test_spans_preserved_only_on_match_entries(self):
+        entries = [
+            _entry("2026-04-13", "WORK", text="before"),
+            _entry("2026-04-14", "WORK", text="match"),
+            _entry("2026-04-15", "WORK", text="after"),
+        ]
+        match = search.Match(entry=entries[1], spans=[(0, 3)])
+        blocks = search.expand_with_context(entries, [match], n=1)
+        items = blocks[0]
+        assert items[0]["spans"] == []  # context, not a match
+        assert items[1]["spans"] == [(0, 3)]  # the match
+        assert items[2]["spans"] == []
+
+
+# ---------------------------------------------------------------------------
+# render_text + render_json with blocks
+# ---------------------------------------------------------------------------
+
+class TestRenderWithBlocks:
+    def _block(self, entries: list, match_indices: set):
+        """Helper: build a block dict-list where match_indices are flagged."""
+        return [
+            {"entry": e, "spans": [(0, 3)] if i in match_indices else [], "is_match": i in match_indices}
+            for i, e in enumerate(entries)
+        ]
+
+    def test_text_uses_match_marker(self):
+        entries = [
+            _entry("2026-04-13", "WORK", text="before"),
+            _entry("2026-04-14", "WORK", text="match"),
+        ]
+        match = search.Match(entry=entries[1], spans=[(0, 5)])
+        blocks = [self._block(entries, match_indices={1})]
+        out = search.render_text([match], use_color=False, blocks=blocks)
+        # Match line starts with "▸ ", context lines start with "  "
+        lines = [line for line in out.splitlines() if line.startswith(("▸ ", "  "))]
+        assert any(line.startswith("▸ ") for line in lines)
+        assert any(line.startswith("  ") for line in lines)
+
+    def test_text_inserts_separator_between_blocks(self):
+        entries = [_entry("2026-04-13", "WORK", text=f"e{i}") for i in range(2)]
+        m1 = search.Match(entry=entries[0], spans=[(0, 1)])
+        m2 = search.Match(entry=entries[1], spans=[(0, 1)])
+        blocks = [
+            self._block([entries[0]], match_indices={0}),
+            self._block([entries[1]], match_indices={0}),
+        ]
+        out = search.render_text([m1, m2], use_color=False, blocks=blocks)
+        assert "--" in out
+
+    def test_text_no_blocks_falls_back_to_default_format(self):
+        # When blocks is None, format should match the iter-7 layout: no
+        # ▸ marker, no -- separator.
+        match = search.Match(
+            entry=_entry("2026-04-15", "WORK", "coding", text="dhaara"),
+            spans=[(0, 6)],
+        )
+        out = search.render_text([match], use_color=False, blocks=None)
+        assert "▸" not in out
+        assert "--" not in out
+
+    def test_json_blocks_shape(self):
+        entries = [
+            _entry("2026-04-13", "WORK", text="before"),
+            _entry("2026-04-14", "WORK", text="match"),
+        ]
+        match = search.Match(entry=entries[1], spans=[(0, 5)])
+        blocks = [self._block(entries, match_indices={1})]
+        payload = json.loads(search.render_json([match], blocks=blocks))
+        # Outer is a list of blocks; each block is a list of records.
+        assert isinstance(payload, list)
+        assert isinstance(payload[0], list)
+        records = payload[0]
+        # Both records should carry is_match + match_spans + datetime_iso.
+        for r in records:
+            assert {"is_match", "match_spans", "datetime_iso"} <= r.keys()
+        assert records[0]["is_match"] is False
+        assert records[1]["is_match"] is True
+
+    def test_json_blocks_none_falls_back_to_flat(self):
+        match = search.Match(
+            entry=_entry("2026-04-15", "WORK", "coding", text="x"),
+            spans=[(0, 1)],
+        )
+        payload = json.loads(search.render_json([match], blocks=None))
+        # Flat list of records (iteration 7 shape), not nested blocks.
+        assert isinstance(payload, list)
+        assert isinstance(payload[0], dict)
+
+
+# ---------------------------------------------------------------------------
+# CLI --context
+# ---------------------------------------------------------------------------
+
+class TestCliContext:
+    @pytest.fixture
+    def journal_dir(self, tmp_path: Path) -> Path:
+        j = tmp_path / "data" / "journal"
+        j.mkdir(parents=True)
+        # Build five chronological entries across two days, one of which
+        # mentions "needle".
+        (j / "2026-04-13.md").write_text(
+            "# 2026-04-13 Journal\n\n## [WORK]\n"
+            "- [9:00 AM] [WORK/coding] entry one\n"
+            "- [10:00 AM] [WORK/coding] entry two\n\n"
+            "## [PERSONAL]\n\n## [HABITS]\n\n## [FINANCE]\n"
+        )
+        (j / "2026-04-14.md").write_text(
+            "# 2026-04-14 Journal\n\n## [WORK]\n"
+            "- [9:00 AM] [WORK/coding] entry three\n"
+            "- [10:00 AM] [WORK/coding] needle target\n"
+            "- [11:00 AM] [WORK/coding] entry five\n\n"
+            "## [PERSONAL]\n\n## [HABITS]\n\n## [FINANCE]\n"
+        )
+        return j
+
+    def test_context_zero_unchanged(self, journal_dir: Path, capsys: pytest.CaptureFixture):
+        rc = search.main([
+            "needle",
+            "--data-dir", str(journal_dir.parent),
+            "--color", "never",
+            # no --context
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        # No marker, no separator
+        assert "▸" not in out
+        assert "--\n" not in out
+        assert "needle target" in out
+
+    def test_context_one_pulls_neighbors(self, journal_dir: Path, capsys: pytest.CaptureFixture):
+        rc = search.main([
+            "needle",
+            "--data-dir", str(journal_dir.parent),
+            "--context", "1",
+            "--color", "never",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        # Match marked with ▸; context entries are present
+        assert "▸ " in out
+        assert "entry three" in out  # one before
+        assert "entry five" in out   # one after
+
+    def test_context_negative_errors(self, journal_dir: Path):
+        with pytest.raises(SystemExit):
+            search.main([
+                "needle",
+                "--data-dir", str(journal_dir.parent),
+                "--context", "-1",
+            ])
+
+    def test_context_json_emits_blocks(self, journal_dir: Path, capsys: pytest.CaptureFixture):
+        rc = search.main([
+            "needle",
+            "--data-dir", str(journal_dir.parent),
+            "--context", "1",
+            "-f", "json",
+        ])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        # Single block, 3 entries, exactly one is_match
+        assert len(payload) == 1
+        assert len(payload[0]) == 3
+        match_count = sum(1 for r in payload[0] if r["is_match"])
+        assert match_count == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

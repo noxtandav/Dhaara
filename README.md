@@ -447,9 +447,14 @@ python scripts/search.py "API\b" --regex --match-case --category WORK
 
 # JSON for piping
 python scripts/search.py "claude" -f json
+
+# Surrounding context: 2 entries before and after each hit
+python scripts/search.py Hitachi --context 2
 ```
 
 Matches are highlighted in bold red on a TTY (use `--color always|never` to override). Exit code is 0 on hits, 1 on no matches — handy for shell scripting.
+
+With `--context N` (or `-C N`), each match shows the N entries before and after it in chronological order. Adjacent windows merge automatically; non-adjacent blocks are separated by `--`. Actual matches are marked with `▸ ` so you can spot them within the context. JSON output shifts to a list-of-blocks shape with an `is_match` flag per entry.
 
 ### Weekly summary
 

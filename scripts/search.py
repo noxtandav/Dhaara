@@ -107,29 +107,127 @@ def highlight(text: str, spans: list[tuple[int, int]], use_color: bool) -> str:
     return "".join(pieces)
 
 
-def render_text(matches: list[Match], use_color: bool) -> str:
+def expand_with_context(
+    entries: list[Entry],
+    matches: list[Match],
+    n: int,
+) -> list[list[dict]]:
+    """Group matches into chronological context blocks of +/- n entries.
+
+    Returns a list of blocks; each block is a list of `{entry, spans,
+    is_match}` dicts in chronological order. Adjacent blocks (whose
+    windows overlap) are merged. The output is intended for
+    `render_text` / `render_json` to consume.
+
+    With n=0 each match is its own block of size 1; with n>=1 a block
+    can collect several nearby matches together with their surrounding
+    context.
+    """
+    if not matches:
+        return []
+
+    # `entries` is already in chronological order from collect_entries.
+    # Index match entries by Python identity — matches' entries are the
+    # same objects we got from collect_entries, so id() lookup works.
+    spans_by_id = {id(m.entry): m.spans for m in matches}
+
+    # Find the chronological indices of matches.
+    match_indices = sorted(
+        i for i, e in enumerate(entries) if id(e) in spans_by_id
+    )
+    if not match_indices:
+        return []
+
+    # For each match, mark the (idx-n, idx+n) inclusive range.
+    keep: set[int] = set()
+    for mi in match_indices:
+        for offset in range(-n, n + 1):
+            j = mi + offset
+            if 0 <= j < len(entries):
+                keep.add(j)
+
+    # Group consecutive indices into blocks.
+    blocks: list[list[dict]] = []
+    current: list[dict] = []
+    prev_idx: int | None = None
+    for idx in sorted(keep):
+        entry = entries[idx]
+        if prev_idx is not None and idx != prev_idx + 1:
+            blocks.append(current)
+            current = []
+        current.append({
+            "entry": entry,
+            "spans": spans_by_id.get(id(entry), []),
+            "is_match": id(entry) in spans_by_id,
+        })
+        prev_idx = idx
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _render_entry_line(entry: Entry, spans: list[tuple[int, int]],
+                      use_color: bool, prefix: str) -> str:
+    tag = f"{entry.category}/{entry.subcategory}" if entry.subcategory else entry.category
+    body = highlight(entry.text, spans, use_color)
+    mood_suffix = f"  ({entry.mood})" if entry.mood else ""
+    return f"{prefix}{entry.date} {entry.time:>8}  [{tag}]  {body}{mood_suffix}"
+
+
+def render_text(matches: list[Match], use_color: bool,
+                blocks: list[list[dict]] | None = None) -> str:
     if not matches:
         return "No matches.\n"
+
     lines: list[str] = []
-    for match in matches:
-        e = match.entry
-        tag = f"{e.category}/{e.subcategory}" if e.subcategory else e.category
-        body = highlight(e.text, match.spans, use_color)
-        mood_suffix = f"  ({e.mood})" if e.mood else ""
-        lines.append(f"{e.date} {e.time:>8}  [{tag}]  {body}{mood_suffix}")
+
+    if blocks is None:
+        # No-context path: each match on its own line, no markers.
+        for match in matches:
+            lines.append(_render_entry_line(
+                match.entry, match.spans, use_color, prefix="",
+            ))
+    else:
+        # Context path: blocks separated by `--`; matches marked with `▸ `.
+        for i, block in enumerate(blocks):
+            if i > 0:
+                lines.append("--")
+            for item in block:
+                prefix = "▸ " if item["is_match"] else "  "
+                lines.append(_render_entry_line(
+                    item["entry"], item["spans"], use_color, prefix=prefix,
+                ))
+
     lines.append("")
     lines.append(f"{len(matches)} match(es).")
     return "\n".join(lines) + "\n"
 
 
-def render_json(matches: list[Match]) -> str:
-    payload = []
-    for match in matches:
-        record = asdict(match.entry)
-        record["datetime_iso"] = match.entry.datetime_iso
-        record["match_spans"] = [[s, e] for s, e in match.spans]
-        payload.append(record)
-    return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+def render_json(matches: list[Match],
+                blocks: list[list[dict]] | None = None) -> str:
+    if blocks is None:
+        # No-context path: flat list of match records, same as before.
+        payload = []
+        for match in matches:
+            record = asdict(match.entry)
+            record["datetime_iso"] = match.entry.datetime_iso
+            record["match_spans"] = [[s, e] for s, e in match.spans]
+            payload.append(record)
+        return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+    # Context path: list of blocks, each block a list of context records.
+    payload_blocks = []
+    for block in blocks:
+        rendered = []
+        for item in block:
+            entry: Entry = item["entry"]
+            record = asdict(entry)
+            record["datetime_iso"] = entry.datetime_iso
+            record["match_spans"] = [[s, e] for s, e in item["spans"]]
+            record["is_match"] = item["is_match"]
+            rendered.append(record)
+        payload_blocks.append(rendered)
+    return json.dumps(payload_blocks, indent=2, ensure_ascii=False) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -164,7 +262,21 @@ def main(argv: list[str] | None = None) -> int:
         default="auto",
         help="Highlight matches in the text output (default: auto = TTY only).",
     )
+    parser.add_argument(
+        "-C", "--context",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "Show N entries of chronological context before and after each match. "
+            "Adjacent windows merge; non-adjacent blocks are separated by '--' and "
+            "actual matches are marked with '▸ '. Default 0 (matches only)."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    if args.context < 0:
+        parser.error("--context must be non-negative")
 
     if not args.query and not args.mood:
         parser.error("provide a query, --mood, or both")
@@ -203,10 +315,12 @@ def main(argv: list[str] | None = None) -> int:
         args.color == "auto" and sys.stdout.isatty() and os.getenv("NO_COLOR") is None
     )
 
+    blocks = expand_with_context(entries, matches, args.context) if args.context > 0 else None
+
     if args.format == "json":
-        sys.stdout.write(render_json(matches))
+        sys.stdout.write(render_json(matches, blocks=blocks))
     else:
-        sys.stdout.write(render_text(matches, use_color))
+        sys.stdout.write(render_text(matches, use_color, blocks=blocks))
 
     return 0 if matches else 1
 
