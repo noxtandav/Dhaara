@@ -317,6 +317,21 @@ python scripts/stats.py --category HABITS
 
 Currency parsing is best-effort — it understands `₹`, `Rs`, `$`, and bare numbers in FINANCE entries, plus `k`, `lakh`/`lac`, and `cr`/`crore` multipliers.
 
+### Activity calendar
+
+GitHub-contribution-graph-style heatmap that answers "am I journaling consistently?" — rows are weeks, columns are weekdays, cells are bucketed entry counts (`▁▃▅▆▇`). The header line surfaces longest streak, current streak, and best day at a glance.
+
+```bash
+# Last 12 weeks (default)
+python scripts/activity_heatmap.py
+
+# Last year
+python scripts/activity_heatmap.py --since 1y
+
+# Markdown table for embedding in a journal note
+python scripts/activity_heatmap.py --since 4w -f markdown
+```
+
 ### Mood timeline
 
 The agent already tags entries with optional moods. `scripts/mood_timeline.py` adds the missing time dimension — when did "anxious" appear? Was it a one-day spike or a sustained pattern?
